@@ -1,50 +1,90 @@
-<title>Photonic Crowd Test</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Photonic Lab</title>
+<script>
+  // old phone-test links carried their settings in the hash at this address; send them on to the phone test
+  if (/^#c[0-9a-z]*-\d+/.test(location.hash)) location.replace("phone.html" + location.hash);
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  /* One full-screen test scene: the 3D view fills the frame; a readout sits top-left, the controls bottom-left.
-     Deliberately single-look (a neutral studio grey under white text) so the numbers read the same in either theme. */
+  /* Layout: one column of sections by what Kabe does with them; cards in a wrapping grid, each a link to a live page. */
   :root {
-    --ground: #5f6266;
-    --ink: #f3f4f5;
-    --shade: rgba(16, 18, 20, 0.62);
-    --chip: rgba(16, 18, 20, 0.55);
-    --chip-on: #2f7d5b;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    color-scheme: dark;
+    --bg: #eef0f2; --panel: #ffffff; --panel-hi: #f6f9fb; --ink: #1b2129; --muted: #5a6573; --line: #d5dae0;
+    --accent: #1f6f8b; --wait: #a35a00; --done: #2d6a3e;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif; --body: "Source Sans 3", -apple-system, "Segoe UI", sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--ground); color: var(--ink); overflow: hidden; font: 14px/1.4 var(--sans); }
-  canvas { display: block; }
-  #panel {
-    position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px));
-    display: grid; gap: 6px; pointer-events: none;
-  }
-  #howto { background: var(--shade); padding: 8px 10px; border-radius: 8px; max-width: 34rem; text-wrap: pretty; }
-  #hud {
-    background: var(--shade); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere;
-    font: 12px/1.45 var(--mono); font-variant-numeric: tabular-nums; max-width: 46rem;
-  }
-  #nav {
-    position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    display: flex; flex-wrap: wrap; gap: 6px;
-  }
-  #nav button {
-    font: 13px var(--sans); color: var(--ink); background: var(--chip); border: 1px solid rgba(255,255,255,0.18);
-    padding: 8px 11px; border-radius: 999px; cursor: pointer;
-  }
-  #nav button.on { background: var(--chip-on); border-color: transparent; }
-  #nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #12161b; --panel: #1b2027; --panel-hi: #222831; --ink: #e6eaee; --muted: #9aa5b2; --line: #2c333c; --accent: #6fc0db; --wait: #f0b264; --done: #8fd3a0; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #12161b; --panel: #1b2027; --panel-hi: #222831; --ink: #e6eaee; --muted: #9aa5b2; --line: #2c333c; --accent: #6fc0db; --wait: #f0b264; --done: #8fd3a0; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); }
+  main { max-width: 62rem; margin: 0 auto; padding-inline: 16px; padding-block: 32px 64px; display: grid; gap: 34px; }
+  header { display: grid; gap: 6px; }
+  h1 { font: 700 2.1rem/1.1 var(--display); margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); max-width: 42rem; }
+  section { display: grid; gap: 12px; }
+  h2 { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 12px; }
+  a.card { display: grid; gap: 6px; align-content: start; text-decoration: none; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+  a.card:hover, a.card:focus-visible { background: var(--panel-hi); border-color: var(--accent); outline: none; }
+  .t { font: 700 1.15rem/1.25 var(--display); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .tag { font: 500 0.68rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid currentColor; border-radius: 3px; padding: 3px 5px; }
+  .tag.wait { color: var(--wait); } .tag.done { color: var(--done); } .tag.live { color: var(--accent); }
+  .what { color: var(--muted); }
+  .try { font-size: 0.92rem; } .try b { font-weight: 600; }
+  .said { font-style: italic; color: var(--muted); }
+  footer { color: var(--muted); font-size: 0.85rem; max-width: 42rem; }
 </style>
-<div id="panel">
-  <div id="howto"><b>R9:</b> tap <b>run the ramp</b> and leave the phone on the table, screen on, for about 5 minutes. It reloads itself step by step and ends with a summary to screenshot. <b>Ten minutes</b> runs 300 people for 10 minutes (set Auto-Lock to Never first). Stand-in bodies only.</div>
-  <div id="hud">loading…</div>
-</div>
-<div id="nav"></div>
-<script type="importmap">{"imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
-  "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
-  "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.min.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-  "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js"
-}}</script>
-<script type="module" src="./crowd.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Photonic Lab</h1>
+    <p>The people of the holodeck, live in your browser. Every person here is made from a few words and a seed. Bodies are plain stand-ins until R5 brings the real body and the 1660 wardrobe.</p>
+  </header>
+
+  <section>
+    <h2>Waiting for your eye</h2>
+    <div class="grid">
+      <a class="card" href="demo.html#meet">
+        <div class="t">Meeting head-on <span class="tag live">live</span></div>
+        <div class="what">Nine people meet head-on in a lane, seen from above, and one crosses them. They steer round each other early.</div>
+        <div class="try"><b>Judge:</b> do they start to swerve early enough, and does a swerve look like a person's?</div>
+      </a>
+      <a class="card" href="demo.html#plaza">
+        <div class="t">300 in a plaza <span class="tag live">live</span></div>
+        <div class="what">300 people each walking to one spot, then another. When two touch anyway, they're nudged apart and slow for a moment.</div>
+        <div class="try"><b>Judge:</b> does a brush read as a bump or a slide? Anyone stalling where a real person would just go?</div>
+      </a>
+      <a class="card" href="phone.html">
+        <div class="t">R9 phone test <span class="tag wait">run on your iPhone</span></div>
+        <div class="what">Each person's own walk, one near person with skin and long hair, a crowded room, and a check that Safari makes the same 200 people.</div>
+        <div class="try"><b>Do:</b> tap "R9: run the ramp", leave it about 5 minutes with the screen on, screenshot the end. Then "R9: ten minutes", screenshot. Its numbers set every part's compute budget.</div>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Seen</h2>
+    <div class="grid">
+      <a class="card" href="demo.html#words">
+        <div class="t">Their own walks <span class="tag done">judged</span></div>
+        <div class="what">Nine people from words, each walking a walk fitted from real gait data by their age, sex and build.</div>
+        <div class="said">"Walk tests look good but need some minor bump and avoidance". The two cards above are the follow-up.</div>
+      </a>
+      <a class="card" href="phone.html#c2c-300-gl-own-near-room">
+        <div class="t">The near person in a crowded room <span class="tag done">seen</span></div>
+        <div class="what">One person with long loose hair close up, 300 walking around her: the costliest case the phone test measures.</div>
+      </a>
+    </div>
+  </section>
+
+  <footer>Photonic is the people engine for the holodeck project, alongside holo-emitter's rooms. Sources and licences are in the repository's README.</footer>
+</main>
+</body>
+</html>
