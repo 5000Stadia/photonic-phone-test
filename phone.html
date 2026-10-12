@@ -28,15 +28,16 @@
     position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     display: flex; flex-wrap: wrap; gap: 6px;
   }
-  #nav button {
+  #nav a { text-decoration: none; }
+  #nav button, #nav a {
     font: 13px var(--sans); color: var(--ink); background: var(--chip); border: 1px solid rgba(255,255,255,0.18);
     padding: 8px 11px; border-radius: 999px; cursor: pointer;
   }
-  #nav button.on { background: var(--chip-on); border-color: transparent; }
-  #nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  #nav button.on, #nav a.on { background: var(--chip-on); border-color: transparent; }
+  #nav button:focus-visible, #nav a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 </style>
 <div id="panel">
-  <div id="howto"><b>R9:</b> tap <b>run the ramp</b> and leave the phone on the table, screen on, for about 5 minutes. It reloads itself step by step and ends with a summary to screenshot. <b>Ten minutes</b> runs 300 people for 10 minutes (set Auto-Lock to Never first). Stand-in bodies only.</div>
+  <div id="howto"><b>Benchmarks:</b> set Auto-Lock to Never, tap <b>Run every benchmark</b>, and leave the phone on the table with the screen on for about 17 minutes. It reloads itself step by step: the ramp, then ten minutes at 300, then 300 again warm. At the end, tap <b>Send results</b>. Stand-in bodies only.</div>
   <div id="hud">loading…</div>
 </div>
 <div id="nav"></div>

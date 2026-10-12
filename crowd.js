@@ -42,18 +42,35 @@ const nav = document.getElementById("nav");
 const go = (set) => { const p = { ...P, flags: FLAGS, ...set }; location.hash = [p.method, p.n].concat(p.webgl === "1" ? ["gl"] : [], p.flags).join("-"); location.reload(); };
 // The R9 suite: four variants, each ramped up the steps until the median frame passes 34 ms (under 30 fps).
 const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
-const VARIANTS = [["shared walk", []], ["own walks", ["own"]], ["own walks + near person", ["own", "near"]], ["own walks + near person, inside the room", ["own", "near", "room"]]];
-const store = { get: () => { try { return JSON.parse(sessionStorage.getItem("r9suite") || "[]"); } catch (_) { return []; } },
-  set: (v) => { try { sessionStorage.setItem("r9suite", JSON.stringify(v)); } catch (_) {} } };
-const suiteGo = (v, st) => { location.hash = ["c2c", STEPS[st], "gl", ...VARIANTS[v][1], `suite${v}.${st}`].join("-"); location.reload(); };
+// The last three take the near person apart (Kabe's Safari run, 2026-10-12: the near person cost about 50 ms on the
+// iPhone): hair held still (its motion is CPU), hair hidden (its drawing), and half the pixels (fill).
+const VARIANTS = [["shared walk", []], ["own walks", ["own"]], ["own walks + near person", ["own", "near"]], ["own walks + near person, inside the room", ["own", "near", "room"]],
+  ["near person, hair held still", ["own", "near", "still"]], ["near person, hair hidden", ["own", "near", "bald"]], ["near person, half the pixels", ["own", "near", "dpr1"]]];
+// Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
+// play-through): the ramp on a cool phone, then ten minutes at 300 with everything on, then the same 300 again warm.
+// The log lives in localStorage across the reloads and ends in one report to copy or send.
+const BENCH_KEY = "photonic-bench";
+const store = {
+  all: () => { try { return JSON.parse(localStorage.getItem(BENCH_KEY) || "null") || { rows: [] }; } catch (_) { return { rows: [] }; } },
+  save: (b) => { try { localStorage.setItem(BENCH_KEY, JSON.stringify(b)); } catch (_) {} },
+  get: () => store.all().rows, set: (rows) => { const b = store.all(); b.rows = rows; store.save(b); },
+};
+const WARM = [1, 2];                                       // the variants measured again at 300 once the phone is warm
+const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
+const suiteGo = (v, st) => { location.hash = ["c2c", STEPS[st], "gl", ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
+const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
+const warmGo = (k) => { location.hash = ["c2c", 300, "gl", ...VARIANTS[WARM[k]][1], ...QUICK, `suiteW${k}`].join("-"); location.reload(); };
+const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now() }); suiteGo(0, 0); };
+const STAGE = !SUITE ? null : SUITE === "S" ? "sustain" : SUITE[0] === "W" ? "warm" : "ramp";
+try { navigator.wakeLock?.request("screen").catch(() => {}); } catch (_) {}   // keep the screen on where Safari allows it
 const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t" && !SUITE], ["morph basis (c2c)", () => go({ method: "c2c" }), method === "c2c" && !SUITE],
   ["300", () => go({ n: "300" }), N === 300], ["1000", () => go({ n: "1000" }), N === 1000],
   ["own walks", () => go({ flags: OWN ? FLAGS.filter(f => f !== "own") : [...FLAGS, "own"] }), OWN],
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["R9: run the ramp (about 5 min)", () => { store.set([]); suiteGo(0, 0); }, !!SUITE],
-  ["R9: ten minutes", () => { location.hash = "c2c-300-gl-own-near-room-sustain"; location.reload(); }, SUSTAIN]];
+  ["Run every benchmark (about 17 min)", startAll, !!SUITE],
+  ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
   if (on) b.className = "on";
@@ -73,7 +90,7 @@ window.addEventListener("unhandledrejection", (e) => fail(e.reason && e.reason.m
 
 const tBuild0 = performance.now();
 const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
-renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : FLAGS.includes("dpr1") ? 1 : Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = SHADOWS;
 document.body.prepend(renderer.domElement); await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? "webgpu" : "webgl2";
@@ -348,6 +365,7 @@ if (NEAR) {
   const t = performance.now();
   const Hm = await import("./spikes/hair/index.js");
   near = Hm.build(THREE, renderer, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42, hair: { style: "long" } }, "near");   // long and loose: the costliest hair
+  if (FLAGS.includes("bald")) near.traverse(o => { if (/^hair/.test(o.name)) o.visible = false; });   // the cost check only: never a look
   near.position.set(0, 0, side / 2 + 0.6 - 2.6); scene.add(near); nearHair = Hm.moveHair; nearMs = performance.now() - t;
 }
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
@@ -366,7 +384,7 @@ const mb = b => (b / 1048576).toFixed(2) + " MB";
 
 function frame() {
   const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), frameMs = now - last; last = now;
-  const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near) nearHair(near, dt); const b = performance.now();
+  const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near && !FLAGS.includes("still")) nearHair(near, dt); const b = performance.now();
   renderer.render(scene, camera); const c = performance.now();
   if (Q.get("gpu") !== "0" && phase !== "gpu") resolveGpu();
   win.frame.push(frameMs); win.upd.push(b - a); win.rnd.push(c - b);
@@ -379,7 +397,7 @@ function frame() {
     say(`${method} · ${backend} · ${N} people · ${vertsPerPerson.toLocaleString()} verts each · ${draws} draw${draws === 1 ? "" : "s"} (${drawsExpected} crowd) · ${Math.round(triangles).toLocaleString()} tris\n` +
         `frame ${mean_(win.frame).toFixed(2)} ms (${(1000 / mean_(win.frame)).toFixed(0)} fps) · cpu walk ${mean_(win.upd).toFixed(2)} ms · render() ${mean_(win.rnd).toFixed(2)} ms · gpu ${gpuLast == null ? "n/a" : gpuLast.toFixed(2) + " ms"}\n` +
         `crowd data ${mb(crowdBytes)} · gpu memory (three's count) ${mb(renderer.info.memory.total || 0)} · built in ${buildMs.toFixed(0)} ms · first frame ${firstFrameMs.toFixed(0)} ms\n` +
-        (SUITE ? `R9 ramp: ${VARIANTS[+SUITE.split(".")[0]][0]}, step ${N} people\n` : SUSTAIN ? `R9 ten minutes: keep the screen on\n` : "") +
+        (STAGE === "ramp" ? `benchmarks 1 of 3, the ramp: ${VARIANTS[+SUITE.split(".")[0]][0]}, ${N} people\n` : STAGE === "sustain" ? `benchmarks 2 of 3, ten minutes at 300: ${Math.max(0, 10 - minutes.length)} min left\n` : STAGE === "warm" ? `benchmarks 3 of 3, 300 again on a warm phone: ${VARIANTS[WARM[+SUITE.slice(1)]][0]}\n` : SUSTAIN ? `ten minutes: keep the screen on\n` : "") +
         sameText + "\n" + (OWN ? `own walks baked in ${ownMs.toFixed(0)} ms · ` : "") + (NEAR ? `near person built in ${nearMs.toFixed(0)} ms · ` : "") +
         `asked for ${P.webgl === "1" ? "WebGL2" : "WebGPU"}, running ${backend} · ${caps.split(" · ").slice(0, 2).join(" · ")}` + (lastErr && backend !== "webgpu" ? `\nlast WebGPU error: ${lastErr}` : "") + (RUN ? `\nmeasuring: ${phase}` : ""));
     win.frame.length = win.upd.length = win.rnd.length = 0;
@@ -416,7 +434,7 @@ const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFi
 function r9(now, frameMs, cpuMs, rndMs) {
   if (r9t0 === null) r9t0 = now;
   const t = (now - r9t0) / 1000;
-  if (SUITE) {
+  if (STAGE === "ramp" || STAGE === "warm") {
     // warm-up: on a phone a reload goes on building, compiling and uploading for seconds after the first frame, so the
     // window opens only once frames have settled (the last half second's median within 15% of the half second before),
     // at least 4 s in and at most 15 s; then 5 s are measured
@@ -431,18 +449,27 @@ function r9(now, frameMs, cpuMs, rndMs) {
     r9frames.push(frameMs); r9cpu.push(cpuMs); r9rnd.push(rndMs);
     if (t - r9t1 < 5) return;
     r9done = true; renderer.setAnimationLoop(null);
-    const [v, st] = SUITE.split(".").map(Number), sf = stats(r9frames);
-    const rows = store.get();
-    rows.push({ v, name: VARIANTS[v][0], n: N, ...sf, settledAt: +r9t1.toFixed(1), cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
-      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs) });
-    store.set(rows);
+    const sf = stats(r9frames), row = { n: N, ...sf, settledAt: +r9t1.toFixed(1), cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs) };
+    const b = store.all();
+    if (STAGE === "warm") {
+      const k = +SUITE.slice(1); (b.warm ||= []).push({ v: WARM[k], name: VARIANTS[WARM[k]][0], ...row }); store.save(b);
+      return k + 1 < WARM.length ? warmGo(k + 1) : finishAll();
+    }
+    const [v, st] = SUITE.split(".").map(Number);
+    b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b);
     if (sf.median <= 34 && st + 1 < STEPS.length) return suiteGo(v, st + 1);
     if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
-    return summary(rows);
+    return sustainGo();
   }
   // sustain: ten minutes at 300, a row a minute
   r9frames.push(frameMs);
-  if (t >= (minutes.length + 1) * 60) { minutes.push({ minute: minutes.length + 1, ...stats(r9frames), long: r9frames.filter(x => x > 50).length }); r9frames = []; }
+  if (t >= (minutes.length + 1) * (QUICK.length ? 3 : 60)) { minutes.push({ minute: minutes.length + 1, ...stats(r9frames), long: r9frames.filter(x => x > 50).length }); r9frames = []; }
+  if (minutes.length === 10 && STAGE === "sustain") {
+    r9done = true; renderer.setAnimationLoop(null);
+    const b = store.all(); b.sustain = minutes; store.save(b);
+    return warmGo(0);
+  }
   if (minutes.length === 10) {
     r9done = true; renderer.setAnimationLoop(null);
     say(`R9 ten minutes · ${N} people, own walks, near person, inside the room · ${device}\n` +
@@ -476,17 +503,47 @@ async function peopleBench() {
   }
   return `people layer, 300 walking (CPU a tick, median / slowest 5%): avoidance off ${out.off.median} / ${out.off.p95} ms, on ${out.on.median} / ${out.on.p95} ms`;
 }
-function summary(rows) {
-  const lines = [`R9 ramp FINISHED: screenshot this screen · ${device}`, "people digest: checking…", "people layer: measuring… (about 10 s)", "most people still at 30 fps or better (median frame under 34 ms), per variant:"];
+// The end of the run: the digest and the people layer's CPU (each once, here), then the report.
+async function finishAll() {
+  const b = store.all();
+  say("benchmarks: last checks (about 20 s)…");
+  b.digest = await runSame();
+  try { b.people = await peopleBench(); } catch (e) { b.people = "people layer: could not run (" + (e && e.message || e) + ")"; }
+  b.device = device; b.done = Date.now(); store.save(b);
+  report(b);
+}
+function reportText(b) {
+  const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
+    "THE RAMP, cool phone: most people still at 30 fps (median frame under 34 ms)"];
   VARIANTS.forEach(([name], v) => {
-    const r = rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300);
-    lines.push(`· ${name}: ${best ? best.n : "under 100"} people` + (best ? ` (median ${best.median} ms, slowest 5% ${best.p95} ms)` : ""));
-    if (at300) lines.push(`    at 300: median ${at300.median}, slowest 5% ${at300.p95} ms · cpu ${at300.cpu} ms · render() ${at300.render} ms · gpu memory ${at300.mem} MB · built in ${at300.build} ms` + (at300.walkBake ? ` (walks ${at300.walkBake} ms)` : "") + (at300.near ? ` (near person ${at300.near} ms)` : ""));
+    const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
+    L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
+    if (at300) L.push(`    at 300: median ${at300.median}, slowest 5% ${at300.p95} ms · cpu ${at300.cpu} · render() ${at300.render} ms · gpu memory ${at300.mem} MB · built in ${at300.build} ms`);
   });
-  lines.push("", "every step (variant/people:median ms@settled s): " + rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
-  say(lines.join("\n"));
-  runSame().then(t => { lines[1] = t; say(lines.join("\n")); return peopleBench(); })
-    .then(t => { lines[2] = t; say(lines.join("\n")); }, e => { lines[2] = "people layer: could not run (" + (e && e.message || e) + ")"; say(lines.join("\n")); });
+  if (b.sustain) {
+    L.push("", "TEN MINUTES at 300, own walks + near person + room:");
+    for (const m of b.sustain) L.push(`  minute ${String(m.minute).padStart(2)}: median ${m.median}, slowest 5% ${m.p95} ms, frames over 50 ms ${m.long}`);
+  }
+  if (b.warm?.length) {
+    L.push("", "300 AGAIN, warm phone (against the cool ramp):");
+    for (const w of b.warm) { const cool = b.rows.find(x => x.v === w.v && x.n === 300); L.push(`· ${w.name}: median ${w.median}, slowest 5% ${w.p95} ms · cpu ${w.cpu} · render() ${w.render}` + (cool ? ` (cool: ${cool.median} ms)` : "")); }
+  }
+  L.push("", "every ramp step (variant/people:median ms@settled s): " + b.rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
+  return L.join("\n");
+}
+function report(b) {
+  const text = reportText(b), json = JSON.stringify({ device: b.device, rows: b.rows, sustain: b.sustain, warm: b.warm, digest: b.digest, people: b.people });
+  say("DONE. Tap Send results (or Copy results and paste them to Claude).\n" + text);
+  nav.replaceChildren();
+  const send = document.createElement("a"); send.textContent = "Send results"; send.className = "on";
+  const issue = (body) => "https://github.com/5000Stadia/photonic-phone-test/issues/new?title=" + encodeURIComponent("Benchmarks: " + b.device) + "&body=" + encodeURIComponent(body);
+  send.href = issue("```\n" + text + "\n```\n\n<details><summary>data</summary>\n\n```json\n" + json + "\n```\n</details>");
+  if (send.href.length > 7500) send.href = issue("```\n" + text + "\n```");          // a link GitHub takes: the report alone
+  send.target = "_blank"; send.rel = "noopener";
+  const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy results";
+  copy.addEventListener("click", () => navigator.clipboard.writeText(text + "\n\n" + json).then(() => { copy.textContent = "Copied"; }, () => { copy.textContent = "Copy failed: screenshot instead"; }));
+  const again = document.createElement("button"); again.type = "button"; again.textContent = "Run again"; again.addEventListener("click", startAll);
+  for (const el of [send, copy, again]) nav.append(el);
 }
 renderer.setAnimationLoop(frame);
 

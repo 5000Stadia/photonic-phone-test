@@ -11,7 +11,7 @@ Live demos of Photonic, the people engine of the holodeck project: https://5000s
   - `near`: one near person with skin and hair;
   - `room`: the camera inside a crowded room.
 
-The buttons run the R9 ramp (about 5 minutes) and a ten-minute run.
+"Run every benchmark" runs them all back to back (about 17 minutes) and ends with a report to send as an issue here.
 
 ## Sources and licences
 
