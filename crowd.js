@@ -41,7 +41,9 @@ for (const [label, set] of [["one draw (c3t)", { method: "c3t" }], ["12 archetyp
 const caps = (() => { let gl2 = false; try { gl2 = !!document.createElement("canvas").getContext("webgl2"); } catch (_) {}
   return `WebGPU ${"gpu" in navigator ? "present" : "absent"} · WebGL2 ${gl2 ? "present" : "absent"} · ${navigator.userAgent}`; })();
 say("starting…\n" + caps);
-const fail = (m) => { say("error: " + m + "\n" + caps + (P.webgl === "1" ? "" : "\ntrying WebGL2 in 3 s…"));
+let lastErr = ""; try { lastErr = sessionStorage.getItem("webgpuError") || ""; } catch (_) {}
+const fail = (m) => { try { if (P.webgl !== "1") sessionStorage.setItem("webgpuError", String(m)); } catch (_) {}
+  say("error: " + m + "\n" + caps + (P.webgl === "1" ? "" : "\ntrying WebGL2 in 3 s…"));
   if (P.webgl !== "1") setTimeout(() => go({ webgl: "1" }), 3000); };
 window.onerror = (m) => fail(m);
 window.addEventListener("unhandledrejection", (e) => fail(e.reason && e.reason.message || String(e.reason)));
@@ -313,7 +315,8 @@ function frame() {
     lastHud = now;
     say(`${method} · ${backend} · ${N} people · ${vertsPerPerson.toLocaleString()} verts each · ${draws} draw${draws === 1 ? "" : "s"} (${drawsExpected} crowd) · ${Math.round(triangles).toLocaleString()} tris\n` +
         `frame ${mean_(win.frame).toFixed(2)} ms (${(1000 / mean_(win.frame)).toFixed(0)} fps) · cpu walk ${mean_(win.upd).toFixed(2)} ms · render() ${mean_(win.rnd).toFixed(2)} ms · gpu ${gpuLast == null ? "n/a" : gpuLast.toFixed(2) + " ms"}\n` +
-        `crowd data ${mb(crowdBytes)} · gpu memory (three's count) ${mb(renderer.info.memory.total || 0)} · built in ${buildMs.toFixed(0)} ms · first frame ${firstFrameMs.toFixed(0)} ms` + (RUN ? `\nmeasuring: ${phase}` : ""));
+        `crowd data ${mb(crowdBytes)} · gpu memory (three's count) ${mb(renderer.info.memory.total || 0)} · built in ${buildMs.toFixed(0)} ms · first frame ${firstFrameMs.toFixed(0)} ms\n` +
+        `asked for ${P.webgl === "1" ? "WebGL2" : "WebGPU"}, running ${backend} · ${caps.split(" · ").slice(0, 2).join(" · ")}` + (lastErr && backend !== "webgpu" ? `\nlast WebGPU error: ${lastErr}` : "") + (RUN ? `\nmeasuring: ${phase}` : ""));
     win.frame.length = win.upd.length = win.rnd.length = 0;
   }
   if (SHOT && !window.__shot && now - tFirst > 1500) window.__shot = true;
