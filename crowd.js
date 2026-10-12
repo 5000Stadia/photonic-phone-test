@@ -388,8 +388,10 @@ function frame() {
 }
 // ---------- same people on this engine: the golden 200 resolved here, digested, compared with node's ----------
 // (R4's "same doc, same person"; on the iPhone this is the WebKit check, gate gcbbc51)
-let sameText = "people digest: checking…";
-const sameCheck = (async () => {
+// During the ramp it runs once, at the end: on the phone it takes a moment of the main thread, which would otherwise land
+// inside every step's measurement (each step reloads the page).
+let sameText = SUITE ? "people digest: at the end of the ramp" : "people digest: checking…";
+const runSame = async () => {
   try {
     const { resolve } = await import("./traits/resolve.js");
     const golden = (await (await fetch(new URL("./golden.sha256", import.meta.url))).text()).trim();
@@ -403,24 +405,35 @@ const sameCheck = (async () => {
     sameText = d === golden ? "people digest: same 200 people as node ✓" : `people digest: DIFFERENT from node (${d.slice(0, 12)}…)`;
   } catch (e) { sameText = "people digest: could not run (" + (e && e.message || e) + ")"; }
   return sameText;
-})();
+};
+if (!SUITE) runSame();
 
 // ---------- R9: the ramp suite and the ten-minute run ----------
 const ios = (navigator.userAgent.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))? like Mac/) || []).slice(1).filter(Boolean).join(".");
 const device = `${ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
-let r9done = false, r9t0 = null, r9frames = [], r9cpu = [], r9rnd = [], minutes = [];
+let r9done = false, r9t0 = null, r9t1 = null, r9frames = [], r9cpu = [], r9rnd = [], minutes = [], settle = [];
 const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1) });
 function r9(now, frameMs, cpuMs, rndMs) {
   if (r9t0 === null) r9t0 = now;
   const t = (now - r9t0) / 1000;
   if (SUITE) {
-    if (t < 2) return;                                    // warm-up
+    // warm-up: on a phone a reload goes on building, compiling and uploading for seconds after the first frame, so the
+    // window opens only once frames have settled (the last half second's median within 15% of the half second before),
+    // at least 4 s in and at most 15 s; then 5 s are measured
+    if (r9t1 === null) {
+      settle.push(frameMs);
+      if (t < 4) return;
+      const n = settle.length, med = (a) => pct(a, 0.5);
+      const k = Math.max(10, Math.round(500 / Math.max(1, med(settle.slice(-20)))));
+      if (t < 15 && (n < 2 * k || Math.abs(med(settle.slice(n - 2 * k, n - k)) - med(settle.slice(n - k))) > 0.15 * med(settle.slice(n - k)))) return;
+      r9t1 = t;
+    }
     r9frames.push(frameMs); r9cpu.push(cpuMs); r9rnd.push(rndMs);
-    if (t < 6) return;
+    if (t - r9t1 < 5) return;
     r9done = true; renderer.setAnimationLoop(null);
     const [v, st] = SUITE.split(".").map(Number), sf = stats(r9frames);
     const rows = store.get();
-    rows.push({ v, name: VARIANTS[v][0], n: N, ...sf, cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
+    rows.push({ v, name: VARIANTS[v][0], n: N, ...sf, settledAt: +r9t1.toFixed(1), cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
       mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs) });
     store.set(rows);
     if (sf.median <= 34 && st + 1 < STEPS.length) return suiteGo(v, st + 1);
@@ -448,26 +461,32 @@ async function peopleBench() {
     const p = makePopulation({ basis, avoid }), trips = new Map();
     const dest = (id) => { const k = (trips.get(id) ?? 0) + 1; trips.set(id, k); return [(uniform(1, id, "x" + k) - 0.5) * 30, 0, (uniform(1, id, "z" + k) - 0.5) * 30]; };
     for (let i = 0; i < 300; i++) { const id = "p" + i; p.add({ id, recipe: "", at: { pos: [(uniform(2, id, "x") - 0.5) * 30, 0, (uniform(2, id, "z") - 0.5) * 30] } }); p.goTo(id, { pos: dest(id) }); }
+    // Safari's clock steps in whole milliseconds, so each sample is 60 ticks timed together, divided by 60
     const ts = [];
-    for (let f = 0; f < 660; f++) {
-      const t = performance.now(); p.tick(f / 60, 1 / 60, null); if (f >= 60) ts.push(performance.now() - t);
-      for (const e of p.events()) if (e.type === "arrived") p.goTo(e.id, { pos: dest(e.id) });
-      if (f % 60 === 0) await new Promise(r => setTimeout(r, 0));          // let the page breathe
+    for (let g = 0; g < 11; g++) {
+      const t = performance.now();
+      for (let f = g * 60; f < (g + 1) * 60; f++) {
+        p.tick(f / 60, 1 / 60, null);
+        for (const e of p.events()) if (e.type === "arrived") p.goTo(e.id, { pos: dest(e.id) });
+      }
+      if (g > 0) ts.push((performance.now() - t) / 60);                      // the first second is the warm-up
+      await new Promise(r => setTimeout(r, 0));                                // let the page breathe
     }
     out[avoid ? "on" : "off"] = { median: +pct(ts, 0.5).toFixed(2), p95: +pct(ts, 0.95).toFixed(2) };
   }
   return `people layer, 300 walking (CPU a tick, median / slowest 5%): avoidance off ${out.off.median} / ${out.off.p95} ms, on ${out.on.median} / ${out.on.p95} ms`;
 }
 function summary(rows) {
-  const lines = [`R9 ramp · ${device}`, sameText, "people layer: measuring… (about 10 s)", "most people still at 30 fps or better (median frame under 34 ms), per variant:"];
+  const lines = [`R9 ramp FINISHED: screenshot this screen · ${device}`, "people digest: checking…", "people layer: measuring… (about 10 s)", "most people still at 30 fps or better (median frame under 34 ms), per variant:"];
   VARIANTS.forEach(([name], v) => {
     const r = rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300);
     lines.push(`· ${name}: ${best ? best.n : "under 100"} people` + (best ? ` (median ${best.median} ms, slowest 5% ${best.p95} ms)` : ""));
     if (at300) lines.push(`    at 300: median ${at300.median}, slowest 5% ${at300.p95} ms · cpu ${at300.cpu} ms · render() ${at300.render} ms · gpu memory ${at300.mem} MB · built in ${at300.build} ms` + (at300.walkBake ? ` (walks ${at300.walkBake} ms)` : "") + (at300.near ? ` (near person ${at300.near} ms)` : ""));
   });
-  lines.push("", "every step: " + rows.map(x => `${x.v}/${x.n}:${x.median}`).join(" "));
+  lines.push("", "every step (variant/people:median ms@settled s): " + rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
   say(lines.join("\n"));
-  peopleBench().then(t => { lines[2] = t; say(lines.join("\n")); }, e => { lines[2] = "people layer: could not run (" + (e && e.message || e) + ")"; say(lines.join("\n")); });
+  runSame().then(t => { lines[1] = t; say(lines.join("\n")); return peopleBench(); })
+    .then(t => { lines[2] = t; say(lines.join("\n")); }, e => { lines[2] = "people layer: could not run (" + (e && e.message || e) + ")"; say(lines.join("\n")); });
 }
 renderer.setAnimationLoop(frame);
 
