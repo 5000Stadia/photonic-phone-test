@@ -1,0 +1,23 @@
+hair-shader.js and LICENSE in this folder are vendored unchanged from
+
+  github.com/creategamecharacters/threejs-hair-shader  (src/hair-shader.js, LICENSE)
+  commit f0d6cf0d4d, 2026-10-01, "Open-source Three.js hair shader for WebGL and WebGPU"
+  Copyright (c) 2026 Sander Mørch-Jensen, creategamecharacters.com. MIT licence (./LICENSE).
+  sha256 of hair-shader.js as vendored: 947cff0ec4ccd55f5f812c1ff5223759d83119a0e9d8071c2f9e56b074819ed6
+
+Found by Kabe, 2026-10-11. Only the MIT shader is taken. The repository ships no meshes or atlases, and
+nothing else from creategamecharacters.com (its SDK, characters, hair meshes, style folders) is fetched or used.
+
+Safety pass (read in full, 2026-10-11, before vendoring): plain ES module with no imports. The only network
+paths are loadHairParams (fetch of a caller-supplied style URL + "/mh_materials.json") and loadHairAtlas
+(TextureLoader on a caller-supplied URL). Photonic calls neither. It has no eval, Function constructor,
+dynamic import, DOM or storage access, and no telemetry. The creategamecharacters.com URL appears only in
+comments.
+
+What Photonic uses (spikes/hair/shade.js): createHairMaterials() on the node (TSL) path only, with
+`instanced: true`, so one material per tier serves every wearer through the per-instance swatch attributes
+gccRootA, gccRootB and gccTip. Its passes are the opaque alpha-to-coverage pass and the blended fringe under
+MSAA, with root-to-tip tone, per-strand seed brightness and roughness, and the anisotropic GGX lobe through
+an anisotropy (tangent) map. The atlas Photonic paints in code (spikes/hair/atlas.js) speaks its compact
+format: R coverage, G root-to-tip, B per-strand seed. Photonic's additions sit on top of the returned
+materials (a lighting model per tier, per-strand greying and the force bend), never inside this file.

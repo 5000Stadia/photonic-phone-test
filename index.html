@@ -1,8 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Photonic Crowd Test</title>
 <style>
   /* One full-screen test scene: the 3D view fills the frame; a readout sits top-left, the controls bottom-left.
@@ -40,10 +35,8 @@
   #nav button.on { background: var(--chip-on); border-color: transparent; }
   #nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 </style>
-</head>
-<body>
 <div id="panel">
-  <div id="howto">300 stand-in people, each a different body, walking. Hold the phone still for about 10 seconds, then read <b>frame</b> (ms). 16.7 ms means it holds 60 fps; if so, tap 1000 and 3000 to find where it starts to drop. Under 33 ms still fits the manor's 30 fps.</div>
+  <div id="howto"><b>R9:</b> tap <b>run the ramp</b> and leave the phone on the table, screen on, for about 5 minutes. It reloads itself step by step and ends with a summary to screenshot. <b>Ten minutes</b> runs 300 people for 10 minutes (set Auto-Lock to Never first). Stand-in bodies only.</div>
   <div id="hud">loading…</div>
 </div>
 <div id="nav"></div>
@@ -55,5 +48,3 @@
   "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js"
 }}</script>
 <script type="module" src="./crowd.js"></script>
-</body>
-</html>
