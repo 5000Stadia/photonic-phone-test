@@ -31,7 +31,7 @@ import { cross, context, renderOutput } from "three/tsl";
 const TOKEN = (location.hash || "").replace(/^#/, "").split("-");
 const FLAGS = TOKEN.slice(2).filter(f => f !== "gl" && f !== "close");
 const P = { method: TOKEN[0] || "c3t", n: TOKEN[1] || "300", webgl: TOKEN.includes("gl") ? "1" : "0" };
-const OWN = FLAGS.includes("own"), NEAR = FLAGS.includes("near"), ROOM = FLAGS.includes("room"), SUSTAIN = FLAGS.includes("sustain");
+const PLAZA = FLAGS.includes("plaza"), OWN = FLAGS.includes("own"), NEAR = FLAGS.includes("near"), ROOM = FLAGS.includes("room"), SUSTAIN = FLAGS.includes("sustain");
 const SUITE = (FLAGS.find(f => f.startsWith("suite")) || "").replace("suite", "");
 if (TOKEN.includes("close")) P.view = "close";
 const Q = { get: (k) => (k in P ? P[k] : null) };
@@ -51,9 +51,14 @@ const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
 // crowd and near person on both backends, side by side ("wgpu": not pinned to WebGL2). WebGPU has no pixel read-back sync, so
 // its rows also time each frame's submit to the queue's "work done" (GPU done), the GPU's own frame there.
 const NB = ["own", "near", "inline", "sync"], NEARNOW = [...NB, "skinbake", "mhbob"];
-const VARIANTS = [["crowd only, WebGL2", ["own", "inline", "sync"], [300, 1000]], ["crowd only, WebGPU", ["own", "inline", "sync", "wgpu"], [300, 1000]],
-  ["near person (baked skin, bob), WebGL2", NEARNOW, [100, 300]], ["near person (baked skin, bob), WebGPU", [...NEARNOW, "wgpu"], [100, 300]],
-  ["crowd only, 3000, WebGL2", ["own", "inline", "sync"], [3000]], ["crowd only, 3000, WebGPU", ["own", "inline", "sync", "wgpu"], [3000]]];
+// Seventh run (R7, the real people): the live demo's plaza first (300 MakeHuman people in three tiers; "dressed" has the gentlewoman's
+// outfit on about one woman or girl in five, as the demo does, and "undressed" none), on WebGL2 and on WebGPU, then the old
+// stand-in crowd and near person as before. The 3000-person stand-in rows are dropped to keep the run near four minutes.
+const PL = ["plaza", "sync"];
+const VARIANTS = [["real plaza, undressed, WebGL2", PL, [300]], ["real plaza, dressed, WebGL2", [...PL, "dressed"], [300]],
+  ["real plaza, undressed, WebGPU", [...PL, "wgpu"], [300]], ["real plaza, dressed, WebGPU", [...PL, "dressed", "wgpu"], [300]],
+  ["crowd only, WebGL2", ["own", "inline", "sync"], [300, 1000]], ["crowd only, WebGPU", ["own", "inline", "sync", "wgpu"], [300, 1000]],
+  ["near person (baked skin, bob), WebGL2", NEARNOW, [100, 300]], ["near person (baked skin, bob), WebGPU", [...NEARNOW, "wgpu"], [100, 300]]];
 const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
 const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
@@ -65,7 +70,7 @@ const store = {
   save: (b) => { try { localStorage.setItem(BENCH_KEY, JSON.stringify(b)); } catch (_) {} },
   get: () => store.all().rows, set: (rows) => { const b = store.all(); b.rows = rows; store.save(b); },
 };
-const WARM = [0, 1];                                       // the variants measured again at 300 once the phone is warm
+const WARM = [4, 5];                                       // the variants measured again at 300 once the phone is warm
 const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
 const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], ...(VARIANTS[v][1].includes("wgpu") ? [] : ["gl"]), ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
 const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
@@ -79,7 +84,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 3 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 4 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -109,6 +114,99 @@ if (INLINE) {   // no off-screen target: ACES and sRGB in every material's outpu
 }
 document.body.prepend(renderer.domElement); await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? "webgpu" : "webgl2";
+// ---------- measuring helpers, the people digest and the device line (shared by every variant, the real plaza too) ----------
+const mean_ = a => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), pct = (a, q) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
+// sync: read one pixel back after each render, so render() covers the GPU's whole frame and vsync can't hide it
+// (iOS WebGL 2 has no timer queries; this costs the pipelining, so it reads a little high: for cost checks only)
+// WebGPU has no read-back sync: each frame's submit is timed to the queue's work done. While the GPU keeps up, that latency is
+// its frame; once it falls behind the queue backs up and latency only grows, so the gap between successive frames finishing
+// is its frame instead. GPU done is the smaller of the two medians.
+const SYNC = FLAGS.includes("sync"), px = new Uint8Array(4);
+const gpuDone = [], gpuEnds = [];
+const syncGpu = () => { const gl = renderer.backend.gl; if (gl) { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return; }
+  const q = renderer.backend.device?.queue; if (!q) return; const t = performance.now();
+  q.onSubmittedWorkDone().then(() => { const e = performance.now(); gpuDone.push(e - t); gpuEnds.push(e); }); };
+const gpuFrame = () => { if (gpuEnds.length < 3) return undefined; const gaps = gpuEnds.slice(1).map((e, i) => e - gpuEnds[i]);
+  return +Math.min(pct(gpuDone, 0.5), pct(gaps, 0.5)).toFixed(2); };
+// ---------- same people on this engine: the golden 200 resolved here, digested, compared with node's ----------
+// (R4's "same doc, same person"; on the iPhone this is the WebKit check, gate gcbbc51)
+// During the ramp it runs once, at the end: on the phone it takes a moment of the main thread, which would otherwise land
+// inside every step's measurement (each step reloads the page).
+let sameText = SUITE ? "people digest: at the end of the ramp" : "people digest: checking…";
+const runSame = async () => {
+  try {
+    const { resolve } = await import("./traits/resolve.js");
+    const golden = (await (await fetch(new URL("./golden.sha256", import.meta.url))).text()).trim();
+    const dump = [];
+    for (let s = 0; s < 200; s++) {
+      const r = resolve({ id: "g" + s, seed: s * 7919, said: ["", "a man with a very big nose", "a long-haired blonde woman in a red dress", "an old man"][s % 4] });
+      dump.push(JSON.stringify(Object.entries(r.values).sort(([a], [b]) => (a < b ? -1 : 1))));
+    }
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dump.join("\n")));
+    const d = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    sameText = d === golden ? "people digest: same 200 people as node ✓" : `people digest: DIFFERENT from node (${d.slice(0, 12)}…)`;
+  } catch (e) { sameText = "people digest: could not run (" + (e && e.message || e) + ")"; }
+  return sameText;
+};
+const ios = (navigator.userAgent.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))? like Mac/) || []).slice(1).filter(Boolean).join(".");
+const device = `${ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
+const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1) });
+
+// ---------- R7: the real plaza (the live demo's "300 in a plaza": MakeHuman bodies in three tiers, the gentlewoman's outfit) ----------
+// Flag "plaza" with "dressed" (outfits as in the demo: about one woman or girl in five) or without it (outfits off). The scene, the
+// people and the camera come from plaza.js, the demo's own; the camera stays fixed so runs compare. The old stand-in crowd below
+// is not built at all. The row records the frame (median, slowest 5%), render(), GPU done, the people tick's CPU, the first-sight
+// build (from creating the people to the first frame drawn, GPU idle) and the tiers at the end.
+async function plazaRun() {
+  const [{ makeStage, makePlaza, PLAZA_VIEW }, G] = await Promise.all([import("./plaza.js"), import("./gait.js")]);
+  const basis = G.loadBasis(await (await fetch(new URL("./gait-basis.json", import.meta.url))).json());
+  const dressed = FLAGS.includes("dressed");
+  renderer.toneMapping = THREE.NoToneMapping;                       // as the demo has it
+  const scene = makeStage(THREE), camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
+  camera.position.set(...PLAZA_VIEW[0]); camera.lookAt(...PLAZA_VIEW[1]); camera.updateMatrixWorld();
+  addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  const idle = () => new Promise((res) => { const q = renderer.backend.device?.queue; if (q) q.onSubmittedWorkDone().then(res); else { syncGpu(); res(); } });
+  const label = `real plaza, ${dressed ? "dressed" : "undressed"}, ${backend === "webgpu" ? "WebGPU" : "WebGL2"}`;
+  say(`${label}: building 300 people…\n${caps}`);
+  await new Promise(r => setTimeout(r, 50));                         // let the message paint before the main thread is busy
+  const tSight = performance.now();
+  const plaza = makePlaza(THREE, { basis, ...(dressed ? {} : { outfits: false }) });
+  scene.add(plaza.people.group);
+  let counts = plaza.tick(1 / 60, 1 / 60, camera);
+  renderer.render(scene, camera); await idle();
+  const firstSight = performance.now() - tSight;
+  let t = 1 / 60, last = performance.now(), lastHud = 0, t0 = null, t1 = null;
+  const settleF = [], fr = [], tk = [], rn = [];
+  const finishRow = () => {
+    renderer.setAnimationLoop(null);
+    const row = { n: 300, ...stats(fr), settledAt: +t1.toFixed(1), cpu: +mean_(tk).toFixed(2), render: +mean_(rn).toFixed(2),
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(firstSight), backend,
+      counts: { near: counts.near, mid: counts.mid, far: counts.far, classes: counts.classes, passes: counts.passes },
+      ...(gpuEnds.length >= 3 ? { gpuDone: gpuFrame() } : {}), ...(FLAGS.includes("wgpu") && backend !== "webgpu" && lastErr ? { err: lastErr.slice(0, 120) } : {}) };
+    if (SUITE) { const [v, st] = SUITE.split(".").map(Number), b = store.all(); b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b); return advance(v, st); }
+    window.__plaza = row; say(`${label}\n${JSON.stringify(row)}`);
+  };
+  renderer.setAnimationLoop(() => {
+    const now = performance.now(), frameMs = now - last, dt = Math.min(0.1, frameMs / 1000); last = now; t += dt;
+    const a = performance.now(); counts = plaza.tick(t, dt, camera); const b = performance.now();
+    renderer.render(scene, camera); if (SYNC) syncGpu(); const c = performance.now();
+    if (t0 === null) t0 = now;
+    const s = (now - t0) / 1000;
+    if (t1 === null) {          // the same settling as the ramp: at least 4 s, at most 15, until the last half second matches the one before
+      settleF.push(frameMs);
+      const n = settleF.length, med = (x) => pct(x, 0.5), k = Math.max(10, Math.round(500 / Math.max(1, med(settleF.slice(-20)))));
+      if (s < 4 || (s < 15 && (n < 2 * k || Math.abs(med(settleF.slice(n - 2 * k, n - k)) - med(settleF.slice(n - k))) > 0.15 * med(settleF.slice(n - k))))) {
+        if (now - lastHud > 500) { lastHud = now; say(`${label}: settling ${s.toFixed(0)} s · first sight ${firstSight.toFixed(0)} ms\n${caps}`); }
+        return;
+      }
+      t1 = s; gpuDone.length = 0; gpuEnds.length = 0;
+    }
+    fr.push(frameMs); tk.push(b - a); rn.push(c - b);
+    if (now - lastHud > 500) { lastHud = now; say(`${label}: measuring ${(s - t1).toFixed(0)} of 5 s · near ${counts.near} · mid ${counts.mid} · far ${counts.far}\n${caps}`); }
+    if (s - t1 >= 5) finishRow();
+  });
+}
+if (PLAZA) { await plazaRun(); await new Promise(() => {}); }     // nothing below is built for the real plaza
 
 // ---------- the people: parameters, look, where they walk ----------
 const rand = Bd.rng(seed);
@@ -423,22 +521,9 @@ const draws = renderer.info.render.drawCalls, triangles = renderer.info.render.t
 let last = performance.now(), gpuLast = null;
 const win = { frame: [], upd: [], rnd: [] }, all = { frame: [], upd: [], rnd: [] };
 let phase = RUN ? "warm" : "free", t0 = performance.now(), lastHud = 0;
-const mean_ = a => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), pct = (a, q) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
 const resolveGpu = () => renderer.resolveTimestampsAsync("render").then(v => { if (v) gpuLast = v; }).catch(() => {});
 const mb = b => (b / 1048576).toFixed(2) + " MB";
 
-// sync: read one pixel back after each render, so render() covers the GPU's whole frame and vsync can't hide it
-// (iOS WebGL 2 has no timer queries; this costs the pipelining, so it reads a little high: for cost checks only)
-const SYNC = FLAGS.includes("sync"), px = new Uint8Array(4);
-// WebGPU has no read-back sync: each frame's submit is timed to the queue's work done. While the GPU keeps up, that latency is
-// its frame; once it falls behind the queue backs up and latency only grows, so the gap between successive frames finishing
-// is its frame instead. GPU done is the smaller of the two medians.
-const gpuDone = [], gpuEnds = [];
-const syncGpu = () => { const gl = renderer.backend.gl; if (gl) { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return; }
-  const q = renderer.backend.device?.queue; if (!q) return; const t = performance.now();
-  q.onSubmittedWorkDone().then(() => { const e = performance.now(); gpuDone.push(e - t); gpuEnds.push(e); }); };
-const gpuFrame = () => { if (gpuEnds.length < 3) return undefined; const gaps = gpuEnds.slice(1).map((e, i) => e - gpuEnds[i]);
-  return +Math.min(pct(gpuDone, 0.5), pct(gaps, 0.5)).toFixed(2); };
 function frame() {
   const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), frameMs = now - last; last = now;
   const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near && !FLAGS.includes("still")) nearHair(near, dt); const b = performance.now();
@@ -461,33 +546,15 @@ function frame() {
   }
   if (SHOT && !window.__shot && now - tFirst > 1500) window.__shot = true;
 }
-// ---------- same people on this engine: the golden 200 resolved here, digested, compared with node's ----------
-// (R4's "same doc, same person"; on the iPhone this is the WebKit check, gate gcbbc51)
-// During the ramp it runs once, at the end: on the phone it takes a moment of the main thread, which would otherwise land
-// inside every step's measurement (each step reloads the page).
-let sameText = SUITE ? "people digest: at the end of the ramp" : "people digest: checking…";
-const runSame = async () => {
-  try {
-    const { resolve } = await import("./traits/resolve.js");
-    const golden = (await (await fetch(new URL("./golden.sha256", import.meta.url))).text()).trim();
-    const dump = [];
-    for (let s = 0; s < 200; s++) {
-      const r = resolve({ id: "g" + s, seed: s * 7919, said: ["", "a man with a very big nose", "a long-haired blonde woman in a red dress", "an old man"][s % 4] });
-      dump.push(JSON.stringify(Object.entries(r.values).sort(([a], [b]) => (a < b ? -1 : 1))));
-    }
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dump.join("\n")));
-    const d = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
-    sameText = d === golden ? "people digest: same 200 people as node ✓" : `people digest: DIFFERENT from node (${d.slice(0, 12)}…)`;
-  } catch (e) { sameText = "people digest: could not run (" + (e && e.message || e) + ")"; }
-  return sameText;
-};
 if (!SUITE) runSame();
 
 // ---------- R9: the ramp suite and the ten-minute run ----------
-const ios = (navigator.userAgent.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))? like Mac/) || []).slice(1).filter(Boolean).join(".");
-const device = `${ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
 let r9done = false, r9t0 = null, r9t1 = null, r9frames = [], r9cpu = [], r9rnd = [], minutes = [], settle = [];
-const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1) });
+function advance(v, st) {     // the next step of the ramp, the next variant, or the end
+  if (st + 1 < VARIANTS[v][2].length) return suiteGo(v, st + 1);
+  if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
+  return LONG ? sustainGo() : finishAll();
+}
 function r9(now, frameMs, cpuMs, rndMs) {
   if (r9t0 === null) r9t0 = now;
   const t = (now - r9t0) / 1000;
@@ -517,9 +584,7 @@ function r9(now, frameMs, cpuMs, rndMs) {
     }
     const [v, st] = SUITE.split(".").map(Number);
     b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b);
-    if (st + 1 < VARIANTS[v][2].length) return suiteGo(v, st + 1);
-    if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
-    return LONG ? sustainGo() : finishAll();
+    return advance(v, st);
   }
   // sustain: ten minutes at 300, a row a minute
   r9frames.push(frameMs);
@@ -575,7 +640,7 @@ function reportText(b) {
   const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
     "Each variant at fixed counts: people: median / slowest 5% ms, render() ms (GPU-synced: render() is the whole GPU frame)"];
   VARIANTS.forEach(([name], v) => {
-    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
+    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.counts ? `, people tick ${x.cpu}, first sight ${x.build} ms, near ${x.counts.near} mid ${x.counts.mid} far ${x.counts.far}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
     const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
     L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
     if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);

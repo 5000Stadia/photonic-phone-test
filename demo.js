@@ -3,8 +3,8 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { makePeople } from "./people/index.js";
+import { makeStage, makePlaza, PLAZA_VIEW } from "./plaza.js";
 import { loadBasis } from "./gait.js";
-import { uniform } from "./traits/stream.js";
 const BASIS_URL = "./gait-basis.json";
 
 const SCENES = {
@@ -13,7 +13,6 @@ const SCENES = {
   words: { name: "Their own walks", about: "Nine people made from words (a stout bearded man, an old woman, a girl of 8…), each walking their own walk, fitted from real gait data by age, sex and build." },
 };
 const WORDS = ["a stout bearded man", "a tall thin woman", "an old man", "a girl of 8", "a broad-shouldered man", "a short plump woman", "a boy of 12", "an old woman", "a young man"];
-const MIXED = ["", "a man", "a woman", "a stout bearded man", "a tall thin woman", "an old man", "a girl", "a broad-shouldered man"];
 const kind = SCENES[location.hash.slice(1)] ? location.hash.slice(1) : "meet";
 
 const nav = document.getElementById("nav");
@@ -30,24 +29,18 @@ const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: true })
 renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
 document.body.prepend(renderer.domElement);
 await renderer.init();
-const scene = new THREE.Scene(); scene.background = new THREE.Color(0x6b6e72);
-scene.add(new THREE.HemisphereLight(0xdde6f0, 0x4a4440, 1.2));
-const key = new THREE.DirectionalLight(0xfff1e0, 2.4); key.position.set(10, 20, 12); scene.add(key);
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardNodeMaterial({ color: 0x7a7c80, roughness: 0.95 }));
-floor.rotation.x = -Math.PI / 2; scene.add(floor);
+const scene = makeStage(THREE);
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49;
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
-let people = null, bumps = 0, round = 0;
-const trips = new Map();
-const elsewhere = (id) => { const k = (trips.get(id) ?? 0) + 1; trips.set(id, k); return [(uniform(1, id, "x" + k) - 0.5) * 30, 0, (uniform(1, id, "z" + k) - 0.5) * 30]; };
+let people = null, plaza = null, round = 0;
 
 function start() {
   if (people) scene.remove(people.group);
-  people = makePeople(THREE, { basis, thresholds: { near: 4, mid: 14 } }); scene.add(people.group);
+  if (kind !== "plaza") { people = makePeople(THREE, { basis, thresholds: { near: 4, mid: 14 } }); scene.add(people.group); }
   round++;
   if (kind === "meet") WORDS.forEach((w, i) => {
     const id = `m${round}.${i}`;
@@ -59,12 +52,9 @@ function start() {
     const row = i % 3, k = Math.floor(i / 3), dir = row === 1 ? -1 : 1, z = -row * 1.3;
     people.add({ id: `c${round}.${i}`, recipe: w, at: { pos: [-dir * (3.2 + k * 2.6), 0, z], room: "hall" } }).goTo({ pos: [dir * 14, 0, z] });
   });
-  if (kind === "plaza") for (let i = 0; i < 300; i++) {
-    const id = "w" + i;
-    people.add({ id, recipe: MIXED[i % MIXED.length], at: { pos: [(uniform(2, id, "x") - 0.5) * 30, 0, (uniform(2, id, "z") - 0.5) * 30], room: "hall" } }).goTo({ pos: elsewhere(id) });
-  }
+  if (kind === "plaza") { plaza = makePlaza(THREE, { basis }); people = plaza.people; scene.add(people.group); }   // shared with the phone benchmark (plaza.js)
 }
-const views = { meet: [[0, 4.2, 5.5], [0, 0.4, -2.2]], words: [[0, 1.35, 4.2], [0, 0.85, -1.3]], plaza: [[0, 1.6, 11], [0, 1.2, 0]] };
+const views = { meet: [[0, 4.2, 5.5], [0, 0.4, -2.2]], words: [[0, 1.35, 4.2], [0, 0.85, -1.3]], plaza: PLAZA_VIEW };
 // a phone held upright sees less across, so the camera stands further back (along the same line of sight)
 const back = kind === "plaza" ? 1 : Math.max(1, 0.8 / camera.aspect);
 const [eye, look] = views[kind];
@@ -75,14 +65,11 @@ let last = performance.now(), t = 0, frames = 0, since = last, fps = 0;
 renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
   controls.update();
-  const c = people.tick(t, dt, camera);
-  for (const e of people.events()) {
-    if (e.type === "bumped") bumps += 0.5;
-    if (kind === "plaza" && e.type === "arrived") people.get(e.id).goTo({ pos: elsewhere(e.id) });
-  }
+  const c = plaza ? plaza.tick(t, dt, camera) : people.tick(t, dt, camera);
+  if (!plaza) people.events();
   if (kind !== "plaza" && people.all().every(p => !p.state().doing)) start();       // everyone through: walk again
   renderer.render(scene, camera);
   frames++;
   if (now - since > 500) { fps = frames * 1000 / (now - since); frames = 0; since = now;
-    hud.textContent = `${people.all().length} people · ${fps.toFixed(0)} fps · near ${c.near} · mid ${c.mid} · far ${c.far}` + (kind === "plaza" ? ` · bumps ${Math.round(bumps)}` : ""); }
+    hud.textContent = `${people.all().length} people · ${fps.toFixed(0)} fps · near ${c.near} · mid ${c.mid} · far ${c.far}` + (kind === "plaza" ? ` · bumps ${plaza.bumps()}` : ""); }
 });
