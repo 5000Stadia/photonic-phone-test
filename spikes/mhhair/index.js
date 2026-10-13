@@ -42,13 +42,13 @@ export async function loadStyles(THREE, ids) {
 // the person's vertices, metres: the body from the built person, then the helper-hair vertices deformed by the same macro targets
 function personPoints(person, r, BODY) {
   const bp = person.children[0].geometry.attributes.position.array;
-  if (bp.length !== BODY * 3) throw new Error(`mhhair: the person's body has ${bp.length / 3} vertices, the pack expects ${BODY}`);
+  if (bp.length < BODY * 3) throw new Error(`mhhair: the person's body has ${bp.length / 3} vertices, the pack expects ${BODY}`);   // the seam copies after the originals are not used here
   const { P } = bake(r);                                      // decimetres, before the person's height scale: the same bake the person was built from
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < BODY; i++) { const y = P[3 * i + 1]; if (y < lo) lo = y; if (y > hi) hi = y; }
   const s = r.height / (hi - lo), H = helper, hp = Float32Array.from(H.base);
   for (const [name, wt] of weights(r)) { const d = H.deltas[name], k = wt * 0.001; for (let i = 0; i < hp.length; i++) hp[i] += d[i] * k; }
-  const Pm = new Float32Array((BODY + H.count) * 3); Pm.set(bp);
+  const Pm = new Float32Array((BODY + H.count) * 3); Pm.set(bp.subarray(0, BODY * 3));
   for (let j = 0; j < H.count; j++) { const o = (BODY + j) * 3; Pm[o] = hp[3 * j] * s; Pm[o + 1] = (hp[3 * j + 1] - lo) * s; Pm[o + 2] = hp[3 * j + 2] * s; }
   return { Pm, s };
 }

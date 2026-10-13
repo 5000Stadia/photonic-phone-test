@@ -95,18 +95,16 @@ export function lightingModel(THREE) {
 }
 
 export const TIERS = ["near", "mid", "far"];
-const made = new Map();
-export function skinMaterial(THREE, tier = "near") {
-  const key = tier;
-  if (made.has(key)) return made.get(key);
+// The skin's paint as nodes: { color, roughness }, built once per tier and read by the live material below and by the
+// near tier's bake (bake.js), which draws the same nodes into UV space. They read the mesh's `rest` attribute and the
+// drawn object's row in the parameter texture, so any mesh with both can be painted with them.
+const painted = new Map();
+export function skinNodes(THREE, tier = "near") {
+  if (painted.has(tier)) return painted.get(tier);
   const T = THREE.TSL;
   const { Fn, attribute, vec3, float, abs, clamp, exp, sqrt, pow, sin, mix, smoothstep, length,
     mx_fractal_noise_vec3, mx_noise_vec3, mx_noise_float, mx_worley_noise_float, mx_cell_noise_float, floor, If } = T;
   const near = tier === "near", far = tier === "far";
-  const SkinLighting = lightingModel(THREE);
-  class SkinMaterial extends THREE.MeshStandardNodeMaterial {
-    setupLightingModel() { return new SkinLighting(); }
-  }
   const P = (c) => param(THREE, c);
   const skinP = P(COLS.skin), lipP = P(COLS.lip), browP = P(COLS.brow), hairP = P(COLS.hair);
   const bs = P(COLS.browShape), marks = P(COLS.marks), sc = P(COLS.scalp), fa = P(COLS.facial);
@@ -230,11 +228,32 @@ export function skinMaterial(THREE, tier = "near") {
     return base;
   });
 
-  const m = new SkinMaterial({ roughness: 0.55, metalness: 0 });
-  m.colorNode = ColorFn();
   const tz = exp(abs(p.x).div(0.16).pow(2).negate()).mul(smoothstep(6.8, 7.0, y)).mul(smoothstep(8.1, 7.9, y)).mul(front);
-  m.roughnessNode = float(0.6).sub(tz.mul(0.12)).add(scalp.mul(0.25));
+  const nodes = { color: ColorFn(), roughness: float(0.6).sub(tz.mul(0.12)).add(scalp.mul(0.25)) };
+  painted.set(tier, nodes);
+  return nodes;
+}
+
+// the live material: the paint evaluated per pixel (mid and far always; near unless the person has a bake)
+const made = new Map();
+export function skinMaterial(THREE, tier = "near") {
+  if (made.has(tier)) return made.get(tier);
+  const nodes = skinNodes(THREE, tier);
+  const m = new (skinClass(THREE))({ roughness: 0.55, metalness: 0 });
+  m.colorNode = nodes.color;
+  m.roughnessNode = nodes.roughness;
   m.name = `skin-${tier}`;
-  made.set(key, m);
+  made.set(tier, m);
   return m;
+}
+// the skin's material class (three's physical model plus the wrapped diffuse); the baked near material uses it too
+const classes = new WeakMap();
+export function skinClass(THREE) {
+  if (!classes.has(THREE)) {
+    const SkinLighting = lightingModel(THREE);
+    classes.set(THREE, class SkinMaterial extends THREE.MeshStandardNodeMaterial {
+      setupLightingModel() { return new SkinLighting(); }
+    });
+  }
+  return classes.get(THREE);
 }

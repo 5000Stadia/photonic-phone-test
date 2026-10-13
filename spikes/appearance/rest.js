@@ -3,6 +3,7 @@
 // everyone: "the left cheek apex", "the brow ridge". The skin, brow, lash, lip and hair masks are all written in it.
 // It is read once from spikes/makehuman's packed data (the same file, so the browser cache serves it) and shared by
 // every person as one BufferAttribute: zero bytes per person.
+import { SEAM } from "../makehuman/index.js";
 const DATA = new URL("../makehuman/data/", import.meta.url);
 const H = await (await fetch(new URL("body.json", DATA))).json();
 const gz = await (await fetch(new URL("body.bin.gz", DATA))).body.pipeThrough(new DecompressionStream("gzip"));
@@ -12,6 +13,12 @@ export const BODY = Math.min(H.eyes.l[0], H.eyes.r[0]);          // drawn body v
 export const REST = new Float32Array(buf, 0, BODY * 3);           // rest positions of the body, decimetres
 export const INDEX = new Uint16Array(buf, H.vertices * 12, H.triangles * 3);
 const ALL = new Float32Array(buf, 0, H.vertices * 3);
+// The drawn body's rest positions: the originals above, then the seam copies (tools/mh/pack.py), which sit where their
+// originals do. This is the `rest` attribute of the drawn mesh and of the skin bake's UV-space mesh.
+const SEAMS = SEAM ?? new Uint16Array(0);
+export const UVN = BODY + SEAMS.length;
+export const REST_DRAWN = (() => { const r = new Float32Array(UVN * 3); r.set(REST);
+  for (let j = 0; j < SEAMS.length; j++) r.set(REST.subarray(SEAMS[j] * 3, SEAMS[j] * 3 + 3), (BODY + j) * 3); return r; })();
 
 // Landmarks on the base mesh, decimetres, left side (+x); masks mirror with |x|. Read off base.obj's wireframe and
 // joint cubes (scratch analysis, not shipped): the eye helper's centre and radius are computed here from the data.

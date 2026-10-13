@@ -342,5 +342,10 @@
 "name": "neutral-male-old",
 "count": 14888
 }
-]
+],
+"uv": {
+"vertices": 14517,
+"copies": 1137,
+"triangles": 26756
+}
 }

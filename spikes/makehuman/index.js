@@ -27,6 +27,19 @@ for (const t of H.targets) {
 }
 // the drawn body is the first BODY vertices; the eye-helper vertices after it only place the eyeballs
 const BODY = Math.min(H.eyes.l[0], H.eyes.r[0]);
+// UV seams (tools/mh/pack.py): the drawn body has UVs, so a vertex on a UV seam exists once per texture coordinate. The
+// first BODY drawn vertices are the original ones, unchanged: everything that indexes by original vertex (the rest frame,
+// hair growth, MakeHuman hair fitting, the targets) reads them as before. The seam copies follow, each naming its
+// original; settleBody() writes their positions and normals, so a seam shades as one continuous surface.
+export const UVN = H.uv ? H.uv.vertices : BODY;                   // drawn body vertices: originals, then seam copies
+export let SEAM = null, UV = null, UV_INDEX = null;                // copy -> original (uint16), uv (float32 x2), drawn triangles (uint16)
+if (H.uv) {
+  const copies = H.uv.copies, o = tailOffset();
+  SEAM = new Uint16Array(buf.slice(o, o + copies * 2));
+  UV = new Float32Array(buf.slice(o + copies * 2, o + copies * 2 + UVN * 8));
+  UV_INDEX = new Uint16Array(buf.slice(o + copies * 2 + UVN * 8, o + copies * 2 + UVN * 8 + H.uv.triangles * 6));
+}
+function tailOffset() { return N * 12 + H.triangles * 6 + (H.garment ? H.garment.triangles * 6 : 0) + H.targets.reduce((n, t) => n + t.count * 8, 0); }
 
 // slider value -> {anchor: share}, between the two neighbouring anchors at the given positions
 function split(v, anchors) {
@@ -71,6 +84,24 @@ export function bake(r) {
   return { P, targets: W.length };
 }
 
+// Normals as three computes them (area-weighted face normals, summed per vertex), on the original topology, then copied to
+// the seam copies; positions of the copies follow their originals. Call after anything moves the body's vertices (age,
+// identity and the arm pose do) in place of computeVertexNormals(), which on the drawn mesh would split every seam.
+export function settleBody(geo) {
+  const p = geo.attributes.position.array, n = geo.attributes.normal.array;
+  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; p[a] = p[b]; p[a + 1] = p[b + 1]; p[a + 2] = p[b + 2]; }
+  n.fill(0, 0, BODY * 3);
+  for (let t = 0; t < INDEX.length; t += 3) {
+    const a = INDEX[t] * 3, b = INDEX[t + 1] * 3, c = INDEX[t + 2] * 3;
+    const cx = p[c] - p[b], cy = p[c + 1] - p[b + 1], cz = p[c + 2] - p[b + 2], ax = p[a] - p[b], ay = p[a + 1] - p[b + 1], az = p[a + 2] - p[b + 2];
+    const nx = cy * az - cz * ay, ny = cz * ax - cx * az, nz = cx * ay - cy * ax;
+    for (const o of [a, b, c]) { n[o] += nx; n[o + 1] += ny; n[o + 2] += nz; }
+  }
+  for (let i = 0; i < BODY * 3; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
+  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; n[a] = n[b]; n[a + 1] = n[b + 1]; n[a + 2] = n[b + 2]; }
+  geo.attributes.position.needsUpdate = true; geo.attributes.normal.needsUpdate = true;
+}
+
 // Standing rule: no person is ever rendered unclothed, at any age. Without the base layer, build() refuses.
 const CLOTH = "#5d6670";   // one neutral, opaque cloth colour
 const OFFSET = 0.004;      // the layer sits this share of the height outside the tights helper's own fit, against z-fighting
@@ -85,9 +116,11 @@ export function build(THREE, r) {
   const s = r.height / (hi - lo);
   for (let i = 0; i < N; i++) { P[3 * i] *= s; P[3 * i + 1] = (P[3 * i + 1] - lo) * s; P[3 * i + 2] *= s; }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(P.subarray(0, BODY * 3), 3));
-  geo.setIndex(new THREE.BufferAttribute(INDEX, 1));
-  geo.computeVertexNormals();
+  geo.setAttribute("position", new THREE.BufferAttribute(P.slice(0, UVN * 3), 3));    // the originals, then the seam copies (settleBody fills them)
+  geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(UVN * 3), 3));
+  geo.setIndex(new THREE.BufferAttribute(UV_INDEX ?? INDEX, 1));
+  if (UV) geo.setAttribute("uv", new THREE.BufferAttribute(UV, 2));
+  settleBody(geo);
   // base layer: its own vertices (moved by the same targets), indexed locally, pushed out along their normals
   const [gs, gn] = H.garment.vertices;
   const cloth = new THREE.BufferGeometry();

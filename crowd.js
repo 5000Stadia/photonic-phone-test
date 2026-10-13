@@ -46,17 +46,14 @@ const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
 // hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
 // blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
 // one pixel read back after each render, so render() covers the GPU's whole frame).
-// Fourth run (after the third, 2026-10-13: in-material tone mapping made MSAA free; the near person adds ~15 ms GPU only
-// with hair AND procedural skin together, either alone under ~3 ms). Why? design/research/r5-cheap-hair.md: a tile GPU's
-// hidden-surface removal rejects only what lies behind opaque fragments, and our hair is alpha-to-coverage cards plus a
-// blended fringe. All GPU-synced, in-material MSAA (the new default), 100 in the crowd: her hair taken apart.
+// Fifth run (after the fourth, 2026-10-13: only opaque hair and plain skin together brought her from ~14 ms to ~6). Both fixes
+// built: her skin baked once into her own texture (skinbake), and MakeHuman hair shells with an opaque core and an
+// alpha-to-coverage rim (mhbob, mhlong, mhupdo: spikes/mhhair, the hairstyle lineup's styles). All GPU-synced, in-material MSAA.
 const NB = ["own", "near", "inline", "sync"];
-const VARIANTS = [["crowd only", ["own", "inline", "sync"], [100]], ["near person, as now", NB, [100]],
-  ["plain skin", [...NB, "skinflat"], [100]], ["hair hidden", [...NB, "bald"], [100]],
-  ["hair alpha-tested, not alpha-to-coverage", [...NB, "hairtest"], [100]], ["hair fully opaque (a cost bound, not a look)", [...NB, "hairopaque"], [100]],
-  ["hair with a flat cheap shader", [...NB, "hairflat"], [100]], ["no fringe pass", [...NB, "nofringe"], [100]],
-  ["no fringe, hair drawn after the body", [...NB, "nofringe", "hairlast"], [100]], ["no fringe, hair drawn before the body", [...NB, "nofringe", "hairfirst"], [100]],
-  ["mid-tier hair (fewer cards)", [...NB, "hairmid"], [100]], ["hair fully opaque, plain skin", [...NB, "hairopaque", "skinflat"], [100]]];
+const VARIANTS = [["crowd only", ["own", "inline", "sync"], [100, 300]], ["near person, as now", NB, [100]],
+  ["baked skin", [...NB, "skinbake"], [100]], ["baked skin, hair fully opaque (a bound)", [...NB, "skinbake", "hairopaque"], [100]],
+  ["baked skin, hair hidden", [...NB, "skinbake", "bald"], [100]], ["baked skin, bob (core + rim)", [...NB, "skinbake", "mhbob"], [100, 300]],
+  ["baked skin, long (core + rim)", [...NB, "skinbake", "mhlong"], [100]], ["baked skin, updo (core + rim)", [...NB, "skinbake", "mhupdo"], [100]]];
 const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
 const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
@@ -82,7 +79,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 3 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 2 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -405,6 +402,15 @@ if (NEAR) {
   if (FLAGS.includes("layerfirst")) near.traverse(o => { if (o.name === "base-layer" || /^hair/.test(o.name)) o.renderOrder = -1; });   // occluders first: early depth rejects the skin under them
   if (FLAGS.includes("nofringe")) near.traverse(o => { if (o.name === "hair-fringe") o.visible = false; });   // the blended second hair pass
   if (FLAGS.includes("skinflat")) near.children[0].material = new THREE.MeshStandardNodeMaterial({ color: "#c99a74", roughness: 0.55 });
+  // mhbob, mhlong, ...: one of the hairstyle lineup's shells (spikes/mhhair) in place of her grown hair
+  const mh = FLAGS.find(f => /^mh[a-z]+$/.test(f));
+  if (mh) {
+    near.traverse(o => { if (o.name === "hair-cards") o.visible = false; });   // her grown cards out (the base layer stays)
+    const M = await import("./spikes/mhhair/index.js"), st = (await M.loadStyles(THREE, [mh.slice(2)]))[mh.slice(2)];
+    M.wear(THREE, renderer, st, near, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42 }, { tip: "#4a3020" });
+  }
+  // skinbake: her procedural skin drawn once into her own 2048 texture (spikes/appearance/bake.js), the near material reading it
+  if (FLAGS.includes("skinbake")) { const B = await import("./spikes/appearance/bake.js"); const k = await B.bakeSkin(THREE, renderer, near); B.releaseBakeScratch(THREE); console.log(`skinbake: ${k.ms.toFixed(0)} ms, ${(k.bytes / 1e6).toFixed(1)} MB`); }
   near.position.set(0, 0, side / 2 + 0.6 - 2.6); scene.add(near); nearHair = Hm.moveHair; nearMs = performance.now() - t;
 }
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });

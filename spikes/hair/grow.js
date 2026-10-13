@@ -24,7 +24,7 @@ const faceTris = () => FACE ??= (() => { const k = [];
   return new Uint16Array(k); })();
 
 export function head(person) {
-  const body = person.children[0], P = body.geometry.attributes.position.array, N = body.geometry.attributes.normal.array, nv = P.length / 3;
+  const body = person.children[0], P = body.geometry.attributes.position.array, N = body.geometry.attributes.normal.array, nv = REST.length / 3;   // the original vertices; seam copies after them are skipped
   // cranium: the baked positions of the rest cranium above the brow; centre and radii from its extent
   let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, top = -1e9;
   for (let i = 0; i < nv; i++) if (REST[3 * i + 1] > 7.6) { x0 = Math.min(x0, P[3 * i]); x1 = Math.max(x1, P[3 * i]); z0 = Math.min(z0, P[3 * i + 2]); z1 = Math.max(z1, P[3 * i + 2]); top = Math.max(top, P[3 * i + 1]); }

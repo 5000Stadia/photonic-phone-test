@@ -9,10 +9,11 @@
 // per tier and shared: near (all detail), mid (one noise octave, no freckles), far (no noise). setTier() switches;
 // tierFor(distance) is the default switch (near under 3 m, mid under 8 m).
 import { build as buildBody } from "../makehuman/index.js";
-import { REST, BODY } from "./rest.js";
+import { REST_DRAWN, UVN } from "./rest.js";
 import { look } from "./look.js";
 import { register } from "./params.js";
 import { skinMaterial } from "./skin.js";
+export { bakeSkin, disposeBake, releaseBakeScratch } from "./bake.js";
 import { addEyes, eyeMaterial } from "./eyes.js";
 import { addHair, hairTier } from "./hair.js";
 
@@ -26,8 +27,8 @@ export function build(THREE, r, tier = "near") {
   const lk = look(r);
   const body = g.children[0];
   if (!g.getObjectByName("base-layer")) throw new Error("appearance: no base layer; refusing to draw an unclothed person");
-  restAttr ??= new THREE.BufferAttribute(REST, 3);
-  if (body.geometry.attributes.position.count !== BODY) throw new Error("appearance: body topology differs from the rest frame");
+  restAttr ??= new THREE.BufferAttribute(REST_DRAWN, 3);
+  if (body.geometry.attributes.position.count !== UVN) throw new Error("appearance: body topology differs from the rest frame");
   body.geometry.setAttribute("rest", restAttr);
   body.material.dispose();
   const trisBefore = count(g);
@@ -47,7 +48,7 @@ export function build(THREE, r, tier = "near") {
 // swap a person's skin, eye and hair materials to a tier (shared materials: no compile after the first of each)
 export function setTier(THREE, g, tier) {
   const base = g.getObjectByName("base-layer");
-  g.children[0].material = skinMaterial(THREE, tier);
+  g.children[0].material = tier === "near" && g.userData.skinBake ? g.userData.skinBake.material : skinMaterial(THREE, tier);   // near: the baked paint, once the person has one (bake.js)
   g.traverse(o => { if (o.name === "eye") o.material = eyeMaterial(THREE, tier); });
   hairTier(THREE, g, tier);
   if (base) { base.visible = true; base.renderOrder = -1; }   // occluders first, so early depth skips the skin under clothes (R9 phone run)
