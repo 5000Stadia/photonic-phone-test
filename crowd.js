@@ -20,7 +20,7 @@
 import * as THREE from "three/webgpu";
 import { Fn, texture, textureLoad, ivec2, int, float, vec2, vec3, uniform, instanceIndex, vertexIndex, attribute, positionLocal, normalLocal, cos, sin, varying } from "three/tsl";
 import * as Bd from "./body.js";
-import { cross } from "three/tsl";
+import { cross, context, renderOutput } from "three/tsl";
 
 // R9 (the iPhone gaps, 2026-10-12) adds flags to the hash token, after METHOD-N: gl (WebGL 2, chosen explicitly),
 // own (each person walks their own fitted gait, baked once per person: walkers.js), near (one near person with skin and
@@ -46,9 +46,18 @@ const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
 // hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
 // blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
 // one pixel read back after each render, so render() covers the GPU's whole frame).
-const VARIANTS = [["own walks", ["own"]], ["own walks + near person", ["own", "near"]], ["near person, no fringe pass", ["own", "near", "nofringe"]],
-  ["near person, no MSAA", ["own", "near", "noaa"]], ["own walks, no MSAA", ["own", "noaa"]], ["near person, half the pixels", ["own", "near", "dpr1"]],
-  ["own walks, GPU-synced", ["own", "sync"]], ["own walks + near person, GPU-synced", ["own", "near", "sync"]]];
+// Third run (after the second, 2026-10-13: MSAA cost a fixed ~14 ms a frame whoever was drawn, because three's WebGPURenderer
+// tone-maps through an off-screen half-float 4x MSAA target and a separate pass; without MSAA 3000 people held 30 fps; her own
+// cost stayed 10-12 ms). Fixed counts, no ramp. Smoothing without the 14 ms: "aa8" keeps the target but 8-bit; "inline"
+// drops the target, tone-maps and converts to sRGB in each material's output and draws straight into the canvas's own MSAA
+// (resolved on-chip). Then her cost taken apart without MSAA: hair hidden, plain skin, both.
+const VARIANTS = [["own walks (MSAA, as now)", ["own"], [100, 300]], ["own walks, no MSAA", ["own", "noaa"], [100, 300]],
+  ["own walks, MSAA, 8-bit target", ["own", "aa8"], [100, 300]], ["own walks, MSAA, tone-mapped in materials", ["own", "inline"], [100, 300]],
+  ["own walks, no MSAA, GPU-synced", ["own", "noaa", "sync"], [100, 300]], ["own walks, MSAA in materials, GPU-synced", ["own", "inline", "sync"], [100, 300]],
+  ["near person, no MSAA", ["own", "near", "noaa"], [100]], ["near person, no MSAA, hair hidden", ["own", "near", "noaa", "bald"], [100]],
+  ["near person, no MSAA, plain skin", ["own", "near", "noaa", "skinflat"], [100]], ["near person, no MSAA, hair hidden, plain skin", ["own", "near", "noaa", "bald", "skinflat"], [100]],
+  ["near person, no MSAA, GPU-synced", ["own", "near", "noaa", "sync"], [100]], ["near person, MSAA in materials", ["own", "near", "inline"], [100]],
+  ["near person, MSAA in materials, GPU-synced", ["own", "near", "inline", "sync"], [100]]];
 const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
 const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
@@ -62,10 +71,10 @@ const store = {
 };
 const WARM = [0, 1];                                       // the variants measured again at 300 once the phone is warm
 const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
-const suiteGo = (v, st) => { location.hash = ["c2c", STEPS[st], "gl", ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
+const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], "gl", ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
 const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
 const warmGo = (k) => { location.hash = ["c2c", 300, "gl", ...VARIANTS[WARM[k]][1], ...QUICK, `suiteW${k}`].join("-"); location.reload(); };
-const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now() }); suiteGo(0, 0); };
+const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now(), fixed: true }); suiteGo(0, 0); };
 const STAGE = !SUITE ? null : SUITE === "S" ? "sustain" : SUITE[0] === "W" ? "warm" : "ramp";
 try { navigator.wakeLock?.request("screen").catch(() => {}); } catch (_) {}   // keep the screen on where Safari allows it
 const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t" && !SUITE], ["morph basis (c2c)", () => go({ method: "c2c" }), method === "c2c" && !SUITE],
@@ -74,7 +83,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 8 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 4 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -94,9 +103,14 @@ window.onerror = (m) => fail(m);
 window.addEventListener("unhandledrejection", (e) => fail(e.reason && e.reason.message || String(e.reason)));
 
 const tBuild0 = performance.now();
-const renderer = new THREE.WebGPURenderer({ antialias: !FLAGS.includes("noaa"), forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
+const INLINE = FLAGS.includes("inline");
+const renderer = new THREE.WebGPURenderer({ antialias: !FLAGS.includes("noaa"), outputBufferType: FLAGS.includes("aa8") ? THREE.UnsignedByteType : THREE.HalfFloatType, forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
 renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : FLAGS.includes("dpr1") ? 1 : Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = SHADOWS;
+if (INLINE) {   // no off-screen target: ACES and sRGB in every material's output, drawn straight into the canvas
+  renderer.toneMapping = THREE.NoToneMapping; renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+  renderer.contextNode = context({ getOutput: (o) => renderOutput(o, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) });
+}
 document.body.prepend(renderer.domElement); await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? "webgpu" : "webgl2";
 
@@ -170,6 +184,7 @@ const geomBytes = g => { let s = 0; for (const a of Object.values(g.attributes))
 
 let rigSets;                                       // the rest joints of each rig
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x6b6e72);
+if (INLINE) scene.background.convertLinearToSRGB();   // the clear isn't shaded: give it the display value directly (ACES left out)
 const crowd = new THREE.Group(); scene.add(crowd);
 
 function material(pidNode, rigNode, withScale, rest = null) {
@@ -474,7 +489,7 @@ function r9(now, frameMs, cpuMs, rndMs) {
     }
     const [v, st] = SUITE.split(".").map(Number);
     b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b);
-    if (sf.median <= 34 && st + 1 < STEPS.length) return suiteGo(v, st + 1);
+    if (st + 1 < VARIANTS[v][2].length) return suiteGo(v, st + 1);
     if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
     return LONG ? sustainGo() : finishAll();
   }
@@ -530,8 +545,9 @@ async function finishAll() {
 }
 function reportText(b) {
   const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
-    "THE RAMP, cool phone: most people still at 30 fps (median frame under 34 ms)"];
+    "Each variant at fixed counts: people: median / slowest 5% ms, render() ms (GPU-synced: render() is the whole GPU frame)"];
   VARIANTS.forEach(([name], v) => {
+    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}`).join(" · ")); return; }
     const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
     L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
     if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);
@@ -545,7 +561,7 @@ function reportText(b) {
     L.push("", "300 AGAIN, warm phone (against the cool ramp):");
     for (const w of b.warm) { const cool = b.rows.find(x => x.v === w.v && x.n === 300); L.push(`· ${w.name}: median ${w.median}, slowest 5% ${w.p95} ms · cpu ${w.cpu} · render() ${w.render}` + (cool ? ` (cool: ${cool.median} ms)` : "")); }
   }
-  L.push("", "every ramp step (variant/people:median ms@settled s): " + b.rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
+  if (!b.fixed) L.push("", "every ramp step (variant/people:median ms@settled s): " + b.rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
   return L.join("\n");
 }
 function report(b) {
