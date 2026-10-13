@@ -1,0 +1,38 @@
+{
+"id": "bob",
+"name": "Sleek bob with bangs",
+"licence": "CC0",
+"author": "Margaret Toigo",
+"source": "http://www.makehumancommunity.org/node/1685",
+"rows": 2670,
+"vertices": 3031,
+"triangles": 4996,
+"body": 13380,
+"scale": [
+[
+5399,
+11998
+],
+[
+791,
+881
+],
+[
+962,
+5320
+]
+],
+"scaleBase": [
+1.48,
+2.3298,
+1.9221
+],
+"helperRefs": 0,
+"scalpMeanDm": 0.107,
+"scalpInsidePct": 8.7,
+"atlas": {
+"size": 1024,
+"median": 0.141,
+"detail": 0.004
+}
+}

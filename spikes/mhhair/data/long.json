@@ -1,0 +1,38 @@
+{
+"id": "long",
+"name": "Long, layered (Hazel)",
+"licence": "CC BY",
+"author": "Elvaerwyn",
+"source": "http://www.makehumancommunity.org/node/2816",
+"rows": 3494,
+"vertices": 4891,
+"triangles": 4181,
+"body": 13380,
+"scale": [
+[
+3924,
+10589
+],
+[
+1524,
+4370
+],
+[
+1892,
+3946
+]
+],
+"scaleBase": [
+2.7574,
+5.7433,
+1.8303
+],
+"helperRefs": 8868,
+"scalpMeanDm": 0.199,
+"scalpInsidePct": 0.2,
+"atlas": {
+"size": 1024,
+"median": 0.432,
+"detail": 0.0289
+}
+}
