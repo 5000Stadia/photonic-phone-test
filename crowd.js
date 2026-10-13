@@ -46,18 +46,17 @@ const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
 // hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
 // blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
 // one pixel read back after each render, so render() covers the GPU's whole frame).
-// Third run (after the second, 2026-10-13: MSAA cost a fixed ~14 ms a frame whoever was drawn, because three's WebGPURenderer
-// tone-maps through an off-screen half-float 4x MSAA target and a separate pass; without MSAA 3000 people held 30 fps; her own
-// cost stayed 10-12 ms). Fixed counts, no ramp. Smoothing without the 14 ms: "aa8" keeps the target but 8-bit; "inline"
-// drops the target, tone-maps and converts to sRGB in each material's output and draws straight into the canvas's own MSAA
-// (resolved on-chip). Then her cost taken apart without MSAA: hair hidden, plain skin, both.
-const VARIANTS = [["own walks (MSAA, as now)", ["own"], [100, 300]], ["own walks, no MSAA", ["own", "noaa"], [100, 300]],
-  ["own walks, MSAA, 8-bit target", ["own", "aa8"], [100, 300]], ["own walks, MSAA, tone-mapped in materials", ["own", "inline"], [100, 300]],
-  ["own walks, no MSAA, GPU-synced", ["own", "noaa", "sync"], [100, 300]], ["own walks, MSAA in materials, GPU-synced", ["own", "inline", "sync"], [100, 300]],
-  ["near person, no MSAA", ["own", "near", "noaa"], [100]], ["near person, no MSAA, hair hidden", ["own", "near", "noaa", "bald"], [100]],
-  ["near person, no MSAA, plain skin", ["own", "near", "noaa", "skinflat"], [100]], ["near person, no MSAA, hair hidden, plain skin", ["own", "near", "noaa", "bald", "skinflat"], [100]],
-  ["near person, no MSAA, GPU-synced", ["own", "near", "noaa", "sync"], [100]], ["near person, MSAA in materials", ["own", "near", "inline"], [100]],
-  ["near person, MSAA in materials, GPU-synced", ["own", "near", "inline", "sync"], [100]]];
+// Fourth run (after the third, 2026-10-13: in-material tone mapping made MSAA free; the near person adds ~15 ms GPU only
+// with hair AND procedural skin together, either alone under ~3 ms). Why? design/research/r5-cheap-hair.md: a tile GPU's
+// hidden-surface removal rejects only what lies behind opaque fragments, and our hair is alpha-to-coverage cards plus a
+// blended fringe. All GPU-synced, in-material MSAA (the new default), 100 in the crowd: her hair taken apart.
+const NB = ["own", "near", "inline", "sync"];
+const VARIANTS = [["crowd only", ["own", "inline", "sync"], [100]], ["near person, as now", NB, [100]],
+  ["plain skin", [...NB, "skinflat"], [100]], ["hair hidden", [...NB, "bald"], [100]],
+  ["hair alpha-tested, not alpha-to-coverage", [...NB, "hairtest"], [100]], ["hair fully opaque (a cost bound, not a look)", [...NB, "hairopaque"], [100]],
+  ["hair with a flat cheap shader", [...NB, "hairflat"], [100]], ["no fringe pass", [...NB, "nofringe"], [100]],
+  ["no fringe, hair drawn after the body", [...NB, "nofringe", "hairlast"], [100]], ["no fringe, hair drawn before the body", [...NB, "nofringe", "hairfirst"], [100]],
+  ["mid-tier hair (fewer cards)", [...NB, "hairmid"], [100]], ["hair fully opaque, plain skin", [...NB, "hairopaque", "skinflat"], [100]]];
 const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
 const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
@@ -83,7 +82,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 4 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 3 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -384,7 +383,20 @@ let near = null, nearMs = 0, nearHair = null;
 if (NEAR) {
   const t = performance.now();
   const Hm = await import("./spikes/hair/index.js");
-  near = Hm.build(THREE, renderer, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42, hair: { style: "long" } }, "near");   // long and loose: the costliest hair
+  near = Hm.build(THREE, renderer, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42, hair: { style: "long" } }, FLAGS.includes("hairmid") ? "mid" : "near");   // long and loose: the costliest hair
+  if (FLAGS.includes("hairmid")) near.children[0].material = (await import("./spikes/appearance/skin.js")).skinMaterial(THREE, "near");   // her near skin, the mid tier's cards
+  // her hair taken apart (fourth run): how the cards cover, what they cost to shade, and when they are drawn
+  const cards = [];
+  near.traverse(o => { if (o.isMesh && o.name === "hair-cards") cards.push(o); });
+  for (const m of cards) {
+    const o = m.material;
+    if (FLAGS.includes("hairtest")) { const c = o.clone(); c.alphaToCoverage = false; c.alphaTest = 0.5; m.material = c; }
+    if (FLAGS.includes("hairopaque")) { const c = o.clone(); c.alphaToCoverage = false; c.alphaTest = 0; c.transparent = false; c.opacityNode = THREE.TSL.float(1); m.material = c; }
+    if (FLAGS.includes("hairflat")) { const c = new THREE.MeshBasicNodeMaterial({ color: "#3a2a20", side: THREE.DoubleSide }); c.positionNode = o.positionNode;
+      c.opacityNode = o.opacityNode; c.alphaToCoverage = o.alphaToCoverage; c.transparent = o.transparent; c.depthWrite = true; m.material = c; }
+    if (FLAGS.includes("hairlast")) m.renderOrder = 2;
+    if (FLAGS.includes("hairfirst")) m.renderOrder = -2;
+  }
   if (FLAGS.includes("bald")) near.traverse(o => { if (/^hair/.test(o.name)) o.visible = false; });   // the cost check only: never a look
   // cost checks on her skin (Kabe's one-run benchmark, 2026-10-12: her cost is per pixel of her body, not her hair):
   // skinmid / skinfar swap the skin's tier, skinflat a plain material; the base layer stays on in every one
