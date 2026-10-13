@@ -36,7 +36,7 @@ controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49;
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
-let people = null, plaza = null, round = 0;
+let people = null, plaza = null, round = 0, loading = false;
 
 function start() {
   if (people) scene.remove(people.group);
@@ -52,7 +52,11 @@ function start() {
     const row = i % 3, k = Math.floor(i / 3), dir = row === 1 ? -1 : 1, z = -row * 1.3;
     people.add({ id: `c${round}.${i}`, recipe: w, at: { pos: [-dir * (3.2 + k * 2.6), 0, z], room: "hall" } }).goTo({ pos: [dir * 14, 0, z] });
   });
-  if (kind === "plaza") { plaza = makePlaza(THREE, { basis }); people = plaza.people; scene.add(people.group); }   // shared with the phone benchmark (plaza.js)
+  if (kind === "plaza") {                       // shared with the phone benchmark (plaza.js); its pipelines compile before the first frame
+    loading = true;
+    plaza = makePlaza(THREE, { basis, compile: async (g) => { scene.add(g); await renderer.compileAsync(scene, camera); } }); people = plaza.people;
+    plaza.ready.then(() => { loading = false; });
+  }
 }
 const views = { meet: [[0, 4.2, 5.5], [0, 0.4, -2.2]], words: [[0, 1.35, 4.2], [0, 0.85, -1.3]], plaza: PLAZA_VIEW };
 // a phone held upright sees less across, so the camera stands further back (along the same line of sight)
@@ -63,7 +67,9 @@ start();
 
 let last = performance.now(), t = 0, frames = 0, since = last, fps = 0;
 renderer.setAnimationLoop(() => {
-  const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
+  const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (loading) { hud.textContent = "preparing 300 people…"; return; }
+  t += dt;
   controls.update();
   const c = plaza ? plaza.tick(t, dt, camera) : people.tick(t, dt, camera);
   if (!plaza) people.events();

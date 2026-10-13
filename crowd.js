@@ -149,7 +149,9 @@ const runSame = async () => {
   return sameText;
 };
 const ios = (navigator.userAgent.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))? like Mac/) || []).slice(1).filter(Boolean).join(".");
-const device = `${ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
+// Safari 26 freezes the OS in its user agent at 18.x; its own version (Version/26.x) is the real one
+const safari = (navigator.userAgent.match(/Version\/(\d+(?:\.\d+)?)/) || [])[1];
+const device = `${safari && ios ? "Safari " + safari + " (user agent says iOS " + ios + ")" : ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
 const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1) });
 
 // ---------- R7: the real plaza (the live demo's "300 in a plaza": MakeHuman bodies in three tiers, the gentlewoman's outfit) ----------
@@ -170,17 +172,23 @@ async function plazaRun() {
   say(`${label}: building 300 people…\n${caps}`);
   await new Promise(r => setTimeout(r, 50));                         // let the message paint before the main thread is busy
   const tSight = performance.now();
-  const plaza = makePlaza(THREE, { basis, ...(dressed ? {} : { outfits: false }) });
-  scene.add(plaza.people.group);
+  // the pipelines compile ahead, in the loading phase (people.warm and compileAsync, then one warm render that builds the skirt
+  // passes); "loading" is all of that, and first sight is the first frame after it, the one a player sees
+  const compile = async (g) => { scene.add(g); await renderer.compileAsync(scene, camera); };
+  const plaza = makePlaza(THREE, { basis, compile, ...(dressed ? {} : { outfits: false }) });
+  await plaza.ready;
   let counts = plaza.tick(1 / 60, 1 / 60, camera);
   renderer.render(scene, camera); await idle();
-  const firstSight = performance.now() - tSight;
+  const loading = performance.now() - tSight, tFirst = performance.now();
+  counts = plaza.tick(2 / 60, 1 / 60, camera);
+  renderer.render(scene, camera); await idle();
+  const firstSight = performance.now() - tFirst;
   let t = 1 / 60, last = performance.now(), lastHud = 0, t0 = null, t1 = null;
   const settleF = [], fr = [], tk = [], rn = [];
   const finishRow = () => {
     renderer.setAnimationLoop(null);
     const row = { n: 300, ...stats(fr), settledAt: +t1.toFixed(1), cpu: +mean_(tk).toFixed(2), render: +mean_(rn).toFixed(2),
-      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(firstSight), backend,
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(firstSight), loading: Math.round(loading), backend,
       counts: { near: counts.near, mid: counts.mid, far: counts.far, classes: counts.classes, passes: counts.passes },
       ...(gpuEnds.length >= 3 ? { gpuDone: gpuFrame() } : {}), ...(FLAGS.includes("wgpu") && backend !== "webgpu" && lastErr ? { err: lastErr.slice(0, 120) } : {}) };
     if (SUITE) { const [v, st] = SUITE.split(".").map(Number), b = store.all(); b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b); return advance(v, st); }
@@ -196,7 +204,7 @@ async function plazaRun() {
       settleF.push(frameMs);
       const n = settleF.length, med = (x) => pct(x, 0.5), k = Math.max(10, Math.round(500 / Math.max(1, med(settleF.slice(-20)))));
       if (s < 4 || (s < 15 && (n < 2 * k || Math.abs(med(settleF.slice(n - 2 * k, n - k)) - med(settleF.slice(n - k))) > 0.15 * med(settleF.slice(n - k))))) {
-        if (now - lastHud > 500) { lastHud = now; say(`${label}: settling ${s.toFixed(0)} s · first sight ${firstSight.toFixed(0)} ms\n${caps}`); }
+        if (now - lastHud > 500) { lastHud = now; say(`${label}: settling ${s.toFixed(0)} s · loading ${loading.toFixed(0)} ms · first sight ${firstSight.toFixed(0)} ms\n${caps}`); }
         return;
       }
       t1 = s; gpuDone.length = 0; gpuEnds.length = 0;
@@ -640,7 +648,7 @@ function reportText(b) {
   const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
     "Each variant at fixed counts: people: median / slowest 5% ms, render() ms (GPU-synced: render() is the whole GPU frame)"];
   VARIANTS.forEach(([name], v) => {
-    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.counts ? `, people tick ${x.cpu}, first sight ${x.build} ms, near ${x.counts.near} mid ${x.counts.mid} far ${x.counts.far}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
+    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.counts ? `, people tick ${x.cpu}, loading ${x.loading ?? "?"} ms, first sight ${x.build} ms, near ${x.counts.near} mid ${x.counts.mid} far ${x.counts.far}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
     const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
     L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
     if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);

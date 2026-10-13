@@ -83,7 +83,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   // neck cut, near); a store's slot fills from { position, normal, cut? }.
   function restStore(Vs, capMax, first) {
     const rows = (n) => Math.ceil(n * Vs * 2 / REST_W), tex = (data) => new THREE.DataTexture(data, REST_W, data.length / 4 / REST_W, THREE.RGBAFormat, THREE.HalfFloatType);
-    const st = { V: Vs, cap: Math.min(capMax, first), capMax, nodes: [], slots: new Map(), lru: [], free: [], next: 0, dirty: false };
+    const st = { V: Vs, cap: Math.min(capMax, first), capMax, nodes: [], slots: new Map(), free: [], next: 0, dirty: false };       // slots: id -> slot, least recently drawn first (a drawn id is moved to the end)
     st.data = new Uint16Array(REST_W * rows(st.cap) * 4); st.tex = tex(st.data);
     st.grow = () => {
       st.cap = Math.min(capMax, st.cap * 2); const d = new Uint16Array(REST_W * rows(st.cap) * 4);
@@ -105,14 +105,13 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       if (s === undefined) {
         if (st.free.length) s = st.free.pop();
         else if (st.next < capMax) { if (st.next >= st.cap) st.grow(); s = st.next++; }
-        else { const old = st.lru.shift(); s = st.slots.get(old); st.slots.delete(old); }
+        else { const old = st.slots.keys().next().value; s = st.slots.get(old); st.slots.delete(old); }
         write(s, body());
-        st.slots.set(rec.id, s);
-      } else { if (again) write(s, body()); st.lru.splice(st.lru.indexOf(rec.id), 1); }
-      st.lru.push(rec.id);
+      } else { if (again) write(s, body()); st.slots.delete(rec.id); }
+      st.slots.set(rec.id, s);
       return s;
     };
-    st.release = (rec) => { if (st.slots.has(rec.id)) { st.free.push(st.slots.get(rec.id)); st.slots.delete(rec.id); st.lru.splice(st.lru.indexOf(rec.id), 1); } };
+    st.release = (rec) => { if (st.slots.has(rec.id)) { st.free.push(st.slots.get(rec.id)); st.slots.delete(rec.id); } };
     return st;
   }
   // mid and near are drawn together in a frame at most as many as there are: nobody drawn this frame is evicted
@@ -126,7 +125,12 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const tiers = { far: { cap: capacity }, mid: { cap: stores.mid.capMax }, near: { cap: nearCapacity } };
   const entries = new Map();
   const baseGeometry = {};
-  const classKey = (rec) => { const d = rec.dressing; return d ? `${d.outfit.id}:${wearMask(d)}` : "base"; };
+  const classKeys = new Map();         // outfit id -> its keys by wear mask (a string made once, not a person a frame)
+  const classKey = (rec) => {
+    const d = rec.dressing; if (!d) return "base";
+    let ks = classKeys.get(d.outfit.id); if (!ks) classKeys.set(d.outfit.id, ks = []);
+    const m = wearMask(d); return ks[m] ??= `${d.outfit.id}:${m}`;
+  };
   const sharedAttrs = new Map();
   function geometryFor(tier, kind, outfit, mask) {
     const g = new THREE.BufferGeometry(), T = tier === "near" ? NEAR : TEMPLATE;
@@ -149,13 +153,14 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return g;
   }
 
-  function entryFor(tier, rec) {
-    const key = tier + "|" + classKey(rec);
+  const entryFor = (tier, rec) => { const d = rec.dressing; return entryOf(tier, d?.outfit ?? null, d ? wearMask(d) : 0); };
+  function entryOf(tier, outfit, mask) {
+    const key = tier + "|" + (outfit ? `${outfit.id}:${mask}` : "base");
     let e = entries.get(key);
     if (e) return e;
     // the far tier's 16 coefficients ride in the agent texture, four texels after the person's others, not as instanced vertex buffers: WebGPU allows 8 vertex buffers a pipeline (iPhone Safari and
     // Chromium alike) and the far class's attributes with four coefficient buffers were 9 (10 dressed)
-    const d = rec.dressing, outfit = d?.outfit ?? null, mask = d ? wearMask(d) : 0, kind = tier === "near" ? "near" : tier === "far" ? "far" : "reduced", coefBase = outfit ? TEXELS_DRESSED : TEXELS, texels = coefBase + (tier === "far" ? 4 : 0);
+    const kind = tier === "near" ? "near" : tier === "far" ? "far" : "reduced", coefBase = outfit ? TEXELS_DRESSED : TEXELS, texels = coefBase + (tier === "far" ? 4 : 0);
     const cap = outfit && tier === "far" ? Math.min(capacity, DRESSED_FAR_CAP) : tiers[tier].cap, data = new Float32Array(texels * cap * 4), tex = new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
     const g = geometryFor(tier, kind, outfit, mask);
     e = { key, tier, cap, data, tex, texels, coefBase, outfit, mask, kind, count: 0 };
@@ -276,7 +281,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   // the garment's tint, for now a colour from the rank (the base layer's; a dressed person's is the outfit's shift); and the person's own skin, from their traits
   const tint = (rec) => { if (!rec.tint) { const c = new THREE.Color().setHSL(rec.rank * 7 % 1, 0.35, 0.45); rec.tint = [c.r, c.g, c.b]; } return rec.tint; };
   const skin = (rec) => { if (!rec.skin) { const c = new THREE.Color(rec.bodyParams.skin); rec.skin = [c.r, c.g, c.b]; } return rec.skin; };
-  const rgb = (rec, name, hex) => { const k = "_c" + name; if (!rec[k]) { const c = new THREE.Color(hex); rec[k] = [c.r, c.g, c.b]; } return rec[k]; };
+  const rgb = (rec, name, hex) => { const k = "_c" + name; if (!rec[k]) { const c = new THREE.Color(hex); rec[k] = [c.r, c.g, c.b]; } return rec[k]; };       // name: shift, bodice or skirt: fields of the record (population.js Person)
 
   // the near body's slot, filled with the base layer's neck cut when she is dressed (layer.js layerCut: s a layer vertex, 0 for the rest)
   const nearBody = (rec) => () => {
@@ -309,17 +314,21 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit).bodice; });
       }
       const o = n * texels * 4;
-      e.data[o] = rec.pos[0]; e.data[o + 1] = rec.pos[2]; e.data[o + 2] = rec.heading; e.data[o + 3] = rec.phase;
-      e.data[o + 4] = rec.walkSlot; e.data[o + 5] = ex; e.data[o + 6] = rec.pos[1];
-      e.data.set(outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), o + 8); e.data.set(skin(rec), o + 12);
+      const D = e.data, pos = rec.pos;
+      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = rec.phase;
+      D[o + 4] = rec.walkSlot; D[o + 5] = ex; D[o + 6] = pos[1];
+      const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
+      D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       if (outfit) {
-        e.data.set(rgb(rec, "bodice", rec.dressing.look.bodice), o + 16); e.data[o + 19] = n;                  // the skirt's row is this instance's (fork B's passes write rows by instance)
-        e.data.set(rgb(rec, "skirt", rec.dressing.look.skirt), o + 20); e.data[o + 23] = gslot;
+        const bo = rgb(rec, "bodice", rec.dressing.look.bodice), sk = rgb(rec, "skirt", rec.dressing.look.skirt);
+        D[o + 16] = bo[0]; D[o + 17] = bo[1]; D[o + 18] = bo[2]; D[o + 19] = n;                  // the skirt's row is this instance's (fork B's passes write rows by instance)
+        D[o + 20] = sk[0]; D[o + 21] = sk[1]; D[o + 22] = sk[2]; D[o + 23] = gslot;
         if (e.skirt) e.skirt.specData.set(specRow(rec), n * SPEC_TEXELS * 4);
       }
       if (name === "far") {
-        e.data[o + 7] = rec.far.scale;
-        for (let k = 0; k < KT; k++) e.data[o + 4 * e.coefBase + k] = rec.far.coef[k];
+        const far = rec.far, base = o + 4 * e.coefBase;
+        D[o + 7] = far.scale;
+        for (let q = 0; q < KT; q++) D[base + q] = far.coef[q];
       }
       n++;
     }
@@ -351,6 +360,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; }
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       return counts;
+    },
+    /** Make the draws for every tier of the base class and of each outfit worn in full, before anyone is in them, so a renderer can compile their pipelines ahead (compileAsync) instead of at the first frame someone is drawn. */
+    warm(outfitList = []) {
+      for (const tier of ["near", "mid", "far"]) { entryOf(tier, null, 0); for (const o of outfitList) entryOf(tier, o, 3); }
+      return entries.size;
     },
     /** Free a removed person's slots. */
     release(rec) {

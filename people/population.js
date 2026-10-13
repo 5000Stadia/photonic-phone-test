@@ -11,6 +11,47 @@ import { paramsFor, build, buildNear, farBody } from "./bodies.js";
 import { makeWalker } from "./walk.js";
 import { outfitFor, dressingFor } from "./outfits.js";
 
+// A person's record. A class, not an object with a getter per person: the record is read in every loop of the tick, and records that share one shape (every field made here, in the
+// same order, the getters on the prototype) keep those reads fast, where per-person getters gave each record a shape of its own. What is built, it is built on first need, so people
+// never seen or walked cost nothing beyond their resolution.
+class Person {
+  constructor(f, env) {
+    this.id = f.id; this.doc = f.doc; this.seed = f.seed; this.res = f.res; this.values = f.res.values; this.rank = f.rank;
+    this.pos = f.pos; this.floor = f.floor; this.room = f.room; this.heading = f.heading; this.phase = f.phase;
+    this.doing = null; this.holding = f.holding; this.presence = f.presence; this.tier = null; this.seen = false;
+    this.height = f.height; this.lastClock = f.lastClock; this.goToken = 0; this.half = Math.max(0.18, 0.13 * f.height);
+    this.env = env; this.gone = false;
+    // what the walking keeps (population.js) and the drawing keeps (draw.js), all here so the shape never changes
+    this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined; this.bumped = undefined;
+    this.offRoute = undefined; this.lastGood = undefined; this.replan = undefined;
+    this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this.nearGarment = undefined; this.specRow = undefined;
+    this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._speed = undefined; this._rate = undefined;
+  }
+  get bodyParams() { return (this._params ??= paramsFor(this.res.values, this.res.derived)); }
+  get body() { return (this._body ??= build(this.bodyParams)); }
+  buildNear() { return buildNear(this.bodyParams); }               // the near tier's full body, built when drawn near, not kept
+  get far() { return (this._far ??= farBody(this.bodyParams)); }   // the far tier's person and the walker's joints, from the table: no body is built for them
+  // what the person wears (outfits.js; a placeholder rule until M3's sampler): null for the base layer only. A wearer's skirt widens the radius they ask of the floor, and their
+  // walker keeps the arms out of the skirt (keepout.js), baked into the walk.
+  get dressing() {
+    if (this._dressing === undefined) {
+      const outfits = this.env.outfits, o = outfits ? outfits(this.id, this.res.values) : null;
+      this._dressing = o ? dressingFor(this.id, o, this.bodyParams, this.far.J) : null;
+      if (this._dressing) this.half = Math.max(this.half, this._dressing.footprint);
+    }
+    return this._dressing;
+  }
+  get walker() {
+    if (this._walker !== undefined) return this._walker;
+    const v = this.res.values, basis = this.env.basis;
+    return (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), height: this.height, keepout: this.dressing?.keepout }, basis) : null);
+  }
+  // the walker's speed and cadence never change once it is made (walk.js makeWalker), so they are read once
+  get speed() { return (this._speed ??= this.walker ? this.walker.v : 1.3); }
+  get rate() { return (this._rate ??= this.walker ? this.walker.f : 0.9); }
+  get built() { return this._body !== null; }
+}
+
 export const TIERS = ["near", "mid", "far"];
 const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of middle rank; R9's phone figures set these
 
@@ -27,6 +68,7 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
 export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, outfits = outfitFor } = {}) {
+  const env = { outfits, basis };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown
@@ -43,7 +85,16 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   const hold = (rec) => ctx.claims?.hold?.(rec.id, rec.floor, rec.pos[0], rec.pos[2], rec.half);
   const active = (rec) => rec.presence !== "offscene" && (!shown || shown.has(rec.room));
 
-  const roomSet = (room) => { if (!rooms.has(room)) rooms.set(room, new Set()); return rooms.get(room); };
+  const roomSet = (room) => { if (!rooms.has(room)) rooms.set(room, new Set()); listed = null; return rooms.get(room); };
+  // everyone in the rooms shown, in room order then arrival order, as records: rebuilt only when someone joins, leaves or changes room, or the rooms shown change
+  let listed = null;
+  const listOf = () => {
+    if (listed) return listed;
+    const out = [], take = (s) => { for (const id of s) { const r = people.get(id); if (r) out.push(r); } };
+    if (shown) { for (const r of shown) { const s = rooms.get(r); if (s) take(s); } }
+    else for (const s of rooms.values()) take(s);
+    return (listed = out);
+  };
   const roomOf = (pos, floor, given) => given ?? ctx.place?.roomAt?.(pos, floor) ?? "";
 
   function add(doc) {
@@ -57,31 +108,9 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     const st = doc.state ?? {};
     const at = st.at ?? doc.at ?? {};
     const pos = (at.pos ?? [0, 0, 0]).slice();
-    const rec = {
-      id, doc, seed, res, values: res.values,
-      rank: uniform(0, id, "rank"),
-      pos, floor: at.floor ?? 0, room: roomOf(pos, at.floor ?? 0, at.room),
-      heading: st.heading ?? 0, phase: st.phase ?? uniform(seed, id, "phase0"),
-      doing: null, holding: st.holding ?? null, presence: st.presence ?? "at_scene",
-      tier: null, seen: false, height: (res.derived["body.height"] ?? 170) / 100, lastClock: clock, goToken: 0,
-    };
-    rec.half = Math.max(0.18, 0.13 * rec.height);
-    // Built on first need, so people never seen or walked cost nothing beyond their resolution.
-    let body = null, params = null, far = null, walker, dressing;
-    Object.defineProperties(rec, {
-      bodyParams: { get: () => (params ??= paramsFor(res.values, res.derived)) },
-      body: { get: () => (body ??= build(rec.bodyParams)) },
-      buildNear: { value: () => buildNear(rec.bodyParams) },        // the near tier's full body, built when drawn near, not kept
-      far: { get: () => (far ??= farBody(rec.bodyParams)) },       // the far tier's person and the walker's joints, from the table: no body is built for them
-      // what the person wears (outfits.js; a placeholder rule until M3's sampler): null for the base layer only. A wearer's skirt widens the radius they ask of the floor, and their
-      // walker keeps the arms out of the skirt (keepout.js), baked into the walk.
-      dressing: { get: () => { if (dressing === undefined) { const o = outfits ? outfits(id, res.values) : null; dressing = o ? dressingFor(id, o, rec.bodyParams, rec.far.J) : null; if (dressing) rec.half = Math.max(rec.half, dressing.footprint); } return dressing; } },
-      walker: { get: () => (walker !== undefined ? walker : (walker = basis ? makeWalker(rec.far.J, {
-        age: res.values.age, sex: res.values.sex === "male" ? 1 : res.values.sex === "female" ? -1 : 0, seed: seedOf(`${seed}:${id}:walk`), height: rec.height, keepout: rec.dressing?.keepout }, basis) : null)) },
-      speed: { get: () => rec.walker ? rec.walker.v : 1.3 },
-      rate: { get: () => rec.walker ? rec.walker.f : 0.9 },
-      built: { get: () => body !== null },
-    });
+    const height = (res.derived["body.height"] ?? 170) / 100;
+    const rec = new Person({ id, doc, seed, res, rank: uniform(0, id, "rank"), pos, floor: at.floor ?? 0, room: roomOf(pos, at.floor ?? 0, at.room),
+      heading: st.heading ?? 0, phase: st.phase ?? uniform(seed, id, "phase0"), holding: st.holding ?? null, presence: st.presence ?? "at_scene", height, lastClock: clock }, env);
     void rec.dressing;           // her skirt's radius is part of her footprint from the start (the stepping aside, the claims)
     people.set(id, rec);
     roomSet(rec.room).add(id);
@@ -94,14 +123,14 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     const rec = people.get(String(id));
     if (!rec) return false;
     rooms.get(rec.room)?.delete(rec.id);
-    people.delete(rec.id);
+    people.delete(rec.id); rec.gone = true; listed = null;
     ctx.claims?.release?.(rec.id);
     return true;
   }
 
   function setRoom(rec, room) {
     if (room === rec.room) return;
-    rooms.get(rec.room)?.delete(rec.id); rec.room = room; roomSet(room).add(rec.id);
+    rooms.get(rec.room)?.delete(rec.id); rec.room = room; roomSet(room).add(rec.id); listed = null;
   }
 
   const posOf = (target) => {
@@ -163,27 +192,47 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   // Returns { turn, pace } (pace: the share of their own speed), or null to stand this frame.
   const TURNS = [0, 0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.35, -1.35];
   const AV = { reach: 3, nearest: 8, horizon: 2.5, margin: 0.06, cell: 2 };
-  let frameNo = 0, grid = new Map();
+  let frameNo = 0;
+  // the grid is kept between frames and emptied each one, so a frame allocates nothing for it: `grid` maps a cell to its people, `cells` lists this frame's occupied cells in the order
+  // they were first filled (bumps walks them in that order)
+  let grid = new Map(); const cells = [];
   // a small integer per grid cell: cells wrap every 2 km and floors every 64, which only adds candidates the
   // distance test then drops
   const cellKey = (floor, i, j) => ((floor & 63) << 20) | ((i & 1023) << 10) | (j & 1023);
   const cellOf = (floor, x, z) => cellKey(floor, Math.floor(x / AV.cell), Math.floor(z / AV.cell));
-  const near = [], nb = [];
   // the nearest within reach, in a shared array (read it before asking again)
+  const nb = [], nbAll = [], nbAllD2 = [];
+  let nbN = 0;
   function neighbours(rec, reach = AV.reach, nearest = AV.nearest) {
-    near.length = 0;
-    const cx = Math.floor(rec.pos[0] / AV.cell), cz = Math.floor(rec.pos[2] / AV.cell), k = Math.ceil(reach / AV.cell - 1e-9);
-    for (let i = cx - k; i <= cx + k; i++) for (let j = cz - k; j <= cz + k; j++) {
-      const cell = grid.get(cellKey(rec.floor, i, j)); if (!cell) continue;
-      for (const o of cell) {
-        if (o === rec) continue;
-        const dx = o.pos[0] - rec.pos[0], dz = o.pos[2] - rec.pos[2], d2 = dx * dx + dz * dz;
-        if (d2 < reach * reach) near.push({ d2, o });
+    let n = 0;
+    const px = rec.pos[0], pz = rec.pos[2], cx = Math.floor(px / AV.cell), cz = Math.floor(pz / AV.cell), k = Math.ceil(reach / AV.cell - 1e-9), r2 = reach * reach, floor = rec.floor;
+    for (let i = cx - k; i <= cx + k; i++) {
+      // a cell wholly further off than the reach holds nobody within it
+      const lo = i * AV.cell - px, hi = lo + AV.cell, gx = lo > 0 ? lo : hi < 0 ? -hi : 0, gx2 = gx * gx;
+      if (gx2 >= r2) continue;
+      for (let j = cz - k; j <= cz + k; j++) {
+        const lz = j * AV.cell - pz, hz = lz + AV.cell, gz = lz > 0 ? lz : hz < 0 ? -hz : 0;
+        if (gx2 + gz * gz >= r2) continue;
+        const cell = grid.get(cellKey(floor, i, j)); if (cell === undefined) continue;
+        for (let c = 0; c < cell.length; c++) {
+          const o = cell[c];
+          if (o === rec) continue;
+          const dx = o.pos[0] - px, dz = o.pos[2] - pz, d2 = dx * dx + dz * dz;
+          if (d2 < r2) { nbAll[n] = o; nbAllD2[n] = d2; n++; }
+        }
       }
     }
-    if (near.length > nearest) { near.sort((a, b) => a.d2 - b.d2 || (a.o.id < b.o.id ? -1 : 1)); near.length = nearest; }
-    nb.length = near.length;
-    for (let i = 0; i < near.length; i++) nb[i] = near[i].o;
+    if (n > nearest) {
+      // the `nearest` closest, nearest first, ties by id (a selection: the order is total, so it is the order a full sort gives)
+      for (let a = 0; a < nearest; a++) {
+        let m = a;
+        for (let b = a + 1; b < n; b++) if (nbAllD2[b] < nbAllD2[m] || (nbAllD2[b] === nbAllD2[m] && nbAll[b].id < nbAll[m].id)) m = b;
+        if (m !== a) { const o = nbAll[a], d = nbAllD2[a]; nbAll[a] = nbAll[m]; nbAllD2[a] = nbAllD2[m]; nbAll[m] = o; nbAllD2[m] = d; }
+      }
+      n = nearest;
+    }
+    nb.length = n; nbN = n;
+    for (let i = 0; i < n; i++) { nb[i] = nbAll[i]; }
     return nb;
   }
   // seconds until two discs (radii summed to r) touch, at relative position p = theirs - mine and relative velocity
@@ -199,39 +248,51 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   // someone the world holds there whom the population doesn't step (we weigh our own by their velocity instead)
   const blocked = (rec, claims, ox, oz) => { const id = claims(rec.floor, rec.pos[0] + ox, rec.pos[2] + oz, rec.half, rec.id); return id != null && !people.has(id); };
   const standAt = (rec, x, z) => (ctx.walk?.stand ? ctx.walk.stand([x, rec.pos[1], z], rec.floor, rec.half) : rec.pos[1]);
-  function choose(rec, dx, dz, v, stepLen) {
-    const nb = neighbours(rec);
-    const claims = ctx.claims?.bodyAt;
-    if (!nb.length && !claims) return { turn: 0, pace: 1 };
-    const la = Math.max(0.45, v * 0.45), base = Math.atan2(dx, dz), bs = Math.sin(base), bc = Math.cos(base);
-    let best = null;
-    const score = (sh, ch, s) => {
-      const ux = sh * v * s, uz = ch * v * s;
-      let tmin = Infinity;
-      for (const o of nb) {
-        const t = ttc(o.pos[0] - rec.pos[0], o.pos[2] - rec.pos[2], ux - o.vel[0], uz - o.vel[1], rec.half + o.half + AV.margin);
-        if (t < tmin) tmin = t;
-      }
-      // straying: the distance between this velocity and the wanted one, in shares of their speed (0 to 2)
-      const stray = Math.hypot(sh * s - bs, ch * s - bc);
-      return stray + (tmin < AV.horizon ? 3 * (AV.horizon - tmin) / AV.horizon : 0);
-    };
-    // the way ahead clear of everyone for the horizon (most of the time, in most places): straight on, nothing more to weigh
-    if (score(bs, bc, 1) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return { turn: 0, pace: 1 };
-    for (const s of [1, 0.55]) for (const a of TURNS) {
-      const sh = Math.sin(base + a), ch = Math.cos(base + a), cost = score(sh, ch, s);
-      if (best && cost >= best.cost) continue;
-      const x = rec.pos[0] + sh * la * s, z = rec.pos[2] + ch * la * s;
-      if (claims && blocked(rec, claims, sh * la * s, ch * la * s)) continue;
-      if (a !== 0) {
-        if (standAt(rec, x, z) == null) continue;                             // no ground there for this body
-        if (standAt(rec, rec.pos[0] + sh * stepLen * s, rec.pos[2] + ch * stepLen * s) == null) continue;
-      }
-      best = { turn: a, pace: s, cost };
+  const STRAIGHT = Object.freeze({ turn: 0, pace: 1 });
+  // the soonest contact (seconds) of a velocity (ux, uz) with the neighbours; a candidate velocity costs its straying plus penalty(tmin)
+  function tminOf(rec, ux, uz) {
+    const rx = rec.pos[0], rz = rec.pos[2];
+    let tmin = Infinity;
+    for (let i = 0; i < nbN; i++) {
+      const o = nb[i];
+      const t = ttc(o.pos[0] - rx, o.pos[2] - rz, ux - o.vel[0], uz - o.vel[1], rec.half + o.half + AV.margin);
+      if (t < tmin) tmin = t;
     }
-    const still = score(0, 0, 0);
-    if (!best || still < best.cost) return null;
-    return best;
+    return tmin;
+  }
+  const penalty = (tmin) => (tmin < AV.horizon ? 3 * (AV.horizon - tmin) / AV.horizon : 0);
+  const SPEEDS = [1, 0.55];
+  function choose(rec, dx, dz, v, stepLen) {
+    neighbours(rec);
+    const claims = ctx.claims?.bodyAt;
+    if (!nbN && !claims) return STRAIGHT;
+    const la = Math.max(0.45, v * 0.45), base = Math.atan2(dx, dz), bs = Math.sin(base), bc = Math.cos(base);
+    // the way ahead clear of everyone for the horizon (most of the time, in most places): straight on, nothing more to weigh
+    // (straying from the wanted velocity is nothing here, so the cost is the penalty alone)
+    if (penalty(tminOf(rec, bs * v, bc * v)) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return STRAIGHT;
+    let have = false, bestTurn = 0, bestPace = 0, bestCost = 0;
+    for (let si = 0; si < 2; si++) {
+      const s = SPEEDS[si];
+      for (let ai = 0; ai < TURNS.length; ai++) {
+        const a = TURNS[ai], sh = Math.sin(base + a), ch = Math.cos(base + a);
+        // straying: the distance between this velocity and the wanted one, in shares of their speed (0 to 2). The cost is at least that, so a candidate straying further than the best
+        // so far cannot win and its neighbours are not weighed (the square root bounds the true length from below within 1e-12)
+        const ex = sh * s - bs, ez = ch * s - bc;
+        if (have && Math.sqrt(ex * ex + ez * ez) * (1 - 1e-12) >= bestCost) continue;
+        const stray = Math.hypot(ex, ez), cost = stray + penalty(tminOf(rec, sh * v * s, ch * v * s));
+        if (have && cost >= bestCost) continue;
+        const x = rec.pos[0] + sh * la * s, z = rec.pos[2] + ch * la * s;
+        if (claims && blocked(rec, claims, sh * la * s, ch * la * s)) continue;
+        if (a !== 0) {
+          if (standAt(rec, x, z) == null) continue;                             // no ground there for this body
+          if (standAt(rec, rec.pos[0] + sh * stepLen * s, rec.pos[2] + ch * stepLen * s) == null) continue;
+        }
+        have = true; bestTurn = a; bestPace = s; bestCost = cost;
+      }
+    }
+    const still = Math.hypot(bs, bc) + penalty(tminOf(rec, 0, 0));
+    if (!have || still < bestCost) return null;
+    return { turn: bestTurn, pace: bestPace, cost: bestCost };
   }
 
   // Bumping: when two bodies overlap anyway (a crowd too dense to avoid everyone, someone stepping out of a door),
@@ -240,13 +301,14 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   const TURN_RATE = 6;                 // radians a second
   let touching = new Set();
   const STENCIL = [[0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];     // each pair of neighbouring cells once
-  function bumps(live, dt) {
+  function bumps(dt) {
     const now = new Set();
-    for (const cell of grid.values()) {
-      const a0 = cell[0], ci = Math.floor(a0.pos[0] / AV.cell), cj = Math.floor(a0.pos[2] / AV.cell);
-      for (const [di, dj] of STENCIL) {
+    for (let c = 0; c < cells.length; c++) {
+      const cell = cells[c], a0 = cell[0], ci = Math.floor(a0.pos[0] / AV.cell), cj = Math.floor(a0.pos[2] / AV.cell);
+      for (let q = 0; q < STENCIL.length; q++) {
+        const di = STENCIL[q][0], dj = STENCIL[q][1];
         const other = di === 0 && dj === 0 ? cell : grid.get(cellKey(a0.floor, ci + di, cj + dj));
-        if (!other) continue;
+        if (!other || other.length === 0) continue;
         for (let x = 0; x < cell.length; x++) for (let y = other === cell ? x + 1 : 0; y < other.length; y++) contact(cell[x], other[y], dt, now);
       }
     }
@@ -371,6 +433,7 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
    * @param cam { pos: [x, y, z], sees?: (center, radius) -> bool }  (draw.js passes the camera frustum)
    * @returns { near: [rec], mid: [rec], far: [rec], visited } — visited counts the people iterated this frame
    */
+  const centre = [0, 0, 0];             // the person's centre, handed to cam.sees (which copies it)
   function tick(t, dt, cam) {
     const out = { near: [], mid: [], far: [], visited: 0 };
     clock += dt; frameNo++;
@@ -396,24 +459,24 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       catchUp(rec);
       if (rec.doing?.token === e.token && rec.doing.route) { const end = rec.doing.route[rec.doing.route.length - 1]; rec.pos[0] = end[0]; rec.pos[2] = end[2]; rec.doing.leg = rec.doing.route.length; step(rec, 0); }
     }
-    const ids = [];
-    if (shown) { for (const r of shown) { const s = rooms.get(r); if (s) for (const id of s) ids.push(id); } }
-    else for (const s of rooms.values()) for (const id of s) ids.push(id);
+    const list = listOf();
     // who is where, for avoiding each other and bumping: everyone stepped this frame, on a 2 m grid
-    grid = new Map();
-    const live = [];
-    for (const id of ids) {
-      const rec = people.get(id);
-      if (!rec || rec.presence === "offscene") continue;
-      rec.vel ??= [0, 0];
-      live.push(rec);
-      const key = cellOf(rec.floor, rec.pos[0], rec.pos[2]);
-      if (!grid.has(key)) grid.set(key, []);
-      grid.get(key).push(rec);
-    }
-    for (const id of ids) {
-      const rec = people.get(id); if (!rec) continue;
+    for (let i = 0; i < cells.length; i++) cells[i].length = 0;
+    cells.length = 0;
+    if (grid.size > 4096) grid = new Map();                                    // cells nobody has stood in for long are let go
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
       if (rec.presence === "offscene") continue;
+      rec.vel ??= [0, 0];
+      const key = cellOf(rec.floor, rec.pos[0], rec.pos[2]);
+      let cell = grid.get(key);
+      if (cell === undefined) grid.set(key, cell = []);
+      if (cell.length === 0) cells.push(cell);
+      cell.push(rec);
+    }
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      if (rec.gone || rec.presence === "offscene") continue;
       out.visited++;
       if (rec.lastClock < clock - dt - 1e-9) catchUp(rec);                     // back from hidden: catch up at once
       if (rec.lastClock < clock) {
@@ -434,14 +497,14 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       }
       rec.seen = false;
       if (rec.presence !== "at_scene" || !cam) continue;
-      const c = [rec.pos[0], rec.pos[1] + rec.height / 2, rec.pos[2]];
+      const c = centre; c[0] = rec.pos[0]; c[1] = rec.pos[1] + rec.height / 2; c[2] = rec.pos[2];
       if (cam.sees && !cam.sees(c, rec.height / 2 + rec.half)) { rec.tier = null; continue; }
       rec.seen = true;
       const d = Math.hypot(c[0] - cam.pos[0], c[1] - cam.pos[1], c[2] - cam.pos[2]);
       rec.tier = tierFor(rec, d);
       out[rec.tier].push(rec);
     }
-    if (avoid && dt > 0) bumps(live, dt);
+    if (avoid && dt > 0) bumps(dt);
     return out;
   }
 
@@ -476,7 +539,7 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     get: (id) => people.get(String(id)) ?? null,
     where(id) { const rec = people.get(String(id)); if (!rec) return null; catchUp(rec); return { pos: rec.pos.slice(), floor: rec.floor, room: rec.room }; },
     all: () => [...people.values()],
-    show(roomIds) { shown = roomIds == null ? null : new Set(roomIds); },
+    show(roomIds) { shown = roomIds == null ? null : new Set(roomIds); listed = null; },
     presence(id, mode) { const rec = people.get(String(id)); if (rec) rec.presence = mode; },
     events() { const e = queue; queue = []; return e; },
     thresholds,
