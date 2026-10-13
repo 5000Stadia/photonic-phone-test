@@ -28,11 +28,11 @@ const PEOPLE = [
     hair: { style: "long", parting: "centre", fringe: "none", eumelanin: 0.6, pheomelanin: 0.15 } },
 ];
 const COLOURS = [["Blond", "#b8915c", 0], ["Brown", "#5a3d26", 0], ["Black", "#1c1714", 0], ["Red", "#a14a22", 0], ["Grey", "#74695e", 0.9]];
-const V2 = new Set(["bob", "updo", "braid"]);   // styles with an improved (v2) version; the rest show only version 1 until they are rebuilt
+const V2 = new Set(["bob", "updo", "braid", "long", "afro"]);   // styles with an improved (v2) version; the rest show only version 1 until they are rebuilt
 let after = Q.get("hair") !== "before";            // the toggle: improved hair, or today's version of the same style
 const STRAND = {};   // per style: "u" if the strands run along U in the atlas (none so far)
 
-const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: true });
+const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: Q.get("webgpu") !== "1" });   // ?webgpu=1: the real WebGPU backend (the default is WebGL 2, the phone fallback)
 renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.NoToneMapping; renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // tone mapping and sRGB in every material
 renderer.contextNode = context({ getOutput: (o) => renderOutput(o, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) });
@@ -44,7 +44,8 @@ const scene = new THREE.Scene(); scene.background = new THREE.Color(0x6b6e72);
 const key = new THREE.DirectionalLight(0xfff1e0, 2.6); key.position.set(2.5, 4, 3.5);
 const fill = new THREE.DirectionalLight(0xc8d8ff, 0.7); fill.position.set(-3, 2, 2);
 const rim = new THREE.DirectionalLight(0xffffff, 1.2); rim.position.set(0, 3, -4);
-scene.add(key, fill, rim, new THREE.HemisphereLight(0xdde6f0, 0x4a4440, 0.6));
+const back = new THREE.DirectionalLight(0xfff4e6, 0); back.position.set(-1.2, 2.2, -3.5);   // a strong light from behind, for the back-light check (setShot back)
+scene.add(key, fill, rim, back, new THREE.HemisphereLight(0xdde6f0, 0x4a4440, 0.6));
 const cam = new THREE.PerspectiveCamera(28, 1, 0.05, 50);
 
 // ---- build everyone
@@ -66,13 +67,14 @@ for (const p of PEOPLE) {
     const topt = { tip: lk.hair.color, grey: lk.hair.grey, strand: STRAND[p.id] || "v" };
     const dials = Object.fromEntries(["rough", "aniso", "spec", "lobe2", "toneK", "detailK", "spec1", "spec2", "exp1", "exp2", "shift1", "shift2", "clumpShift", "wrap", "trans", "hairline", "rootDark", "tipLight", "strays"].filter((k) => Q.get(k)).map((k) => [k, +Q.get(k)]));
     const h1 = wear(THREE, renderer, s, person, r, { ...topt, tune: { debug: Q.get("dbg") || "", ...dials } });
-    const h2 = V2.has(p.id) ? wear(THREE, renderer, styles2[p.id], person, r, { ...topt, tune: dials }) : null;
+    const h2 = V2.has(p.id) ? wear(THREE, renderer, styles2[p.id], person, r, { ...topt, tune: { ...dials, debug: +Q.get("dbg") || 0 } }) : null;
     // one handle for both versions: colour and dials go to both, the page shows one
     const hair = { stats: (h2 || h1).stats, stats1: h1.stats, h1, h2, geometry: (h2 || h1).geometry, set: (a, b) => { h1.set(a, b); if (h2) h2.set(a, b); }, tune: (o) => { h1.tune(o); if (h2) h2.tune(o); },
       show: (v2) => { h1.group.visible = !(v2 && h2); if (h2) h2.group.visible = !!v2; } };
     hair.show(after);
     hairOf[people.length] = hair;
-    entry = { name: m.name, sub: `${m.licence} · ${m.author} · ${m.triangles.toLocaleString()} tris`, stats: hair.stats, hair, r, v2: !!h2 };
+    const m2 = h2 ? styles2[p.id].meta : null, tag = (mm, st) => `${mm.licence} · ${mm.author} · ${st.triangles.toLocaleString()} tris`;
+    entry = { name: m.name, sub: tag(m, h1.stats), labels: { before: { name: m.name + (m2 ? " (before)" : ""), sub: tag(m, h1.stats) }, after: m2 ? { name: m2.name + (p.id === "afro" ? " (improved, still short: no real coils)" : " (improved)"), sub: tag(m2, h2.stats) + (h2.stats.strayTriangles ? ` (${h2.stats.strayTriangles} flyaway)` : "") } : { name: m.name, sub: tag(m, h1.stats) } }, stats: hair.stats, hair, r, v2: !!h2 };
   }
   if (Q.get("plain")) person.children[0].material = new THREE.MeshStandardNodeMaterial({ color: p.skin, roughness: 0.6 });   // for shooting on a software GL: the procedural skin takes minutes to link there
   if (!person.getObjectByName("base-layer")) throw new Error("no base layer: refusing to show an unclothed person");
@@ -113,7 +115,7 @@ function labels(spanH) {
   people.forEach((e, i) => {
     if (!e.person.visible || Math.abs(e.person.position.x) > spanH / 2) return;
     const d = document.createElement("div"); d.className = "lab";
-    d.innerHTML = `<b></b><span></span>`; d.firstChild.textContent = e.name; d.lastChild.textContent = e.sub; labels.appendChild(d);
+    d.innerHTML = `<b></b><span></span>`; const L = e.labels ? e.labels[after ? "after" : "before"] : e; d.firstChild.textContent = L.name; d.lastChild.textContent = L.sub; labels.appendChild(d);
   });
 }
 function resize() { renderer.setSize(W(), H()); dirty = true; }
@@ -129,7 +131,7 @@ for (const b of document.querySelectorAll("#views button")) b.onclick = () => se
 function setFrame(f) { frame = f; for (const b of document.querySelectorAll("#frames button")) b.setAttribute("aria-pressed", String(b.dataset.f === f)); dirty = true; }
 for (const b of document.querySelectorAll("#frames button")) b.onclick = () => setFrame(b.dataset.f);
 
-function setVersion(v) { after = v === "after"; for (const e of people) if (e.hair) e.hair.show(after); for (const b of document.querySelectorAll("#version button")) b.setAttribute("aria-pressed", String(b.dataset.h === v)); dirty = true; }
+function setVersion(v) { after = v === "after"; for (const e of people) if (e.hair) e.hair.show(after); for (const b of document.querySelectorAll("#version button")) b.setAttribute("aria-pressed", String(b.dataset.h === v)); labelKey = ""; dirty = true; }
 for (const b of document.querySelectorAll("#version button")) b.onclick = () => setVersion(b.dataset.h);
 setVersion(after ? "after" : "before");
 
@@ -173,7 +175,8 @@ function loop(now) {
 function check() {
   return people.filter((e) => e.hair).map((e) => ({ id: e.p.id, tris: e.stats.triangles, ratio: e.stats.ratio, fitMs: e.stats.fitMs, ...scalpCheck(e.person, e.hair, e.p.height) }));
 }
-window.setShot = async ({ i = first, yaw: deg = 0, frame: f = frame, colour = null, count = null, hair = null } = {}) => {
+window.setShot = async ({ i = first, yaw: deg = 0, frame: f = frame, colour = null, count = null, hair = null, backlight = false } = {}) => {
+  back.intensity = backlight ? 7 : 0; key.intensity = backlight ? 0.5 : 2.6; fill.intensity = backlight ? 0.15 : 0.7; rim.intensity = backlight ? 0 : 1.2;
   if (count) Q.set("count", String(count));
   if (hair) setVersion(hair);
   renderer.setAnimationLoop(null); turning = false; viewName = "fixed"; yaw = deg * Math.PI / 180; first = w0 = i;
@@ -182,6 +185,19 @@ window.setShot = async ({ i = first, yaw: deg = 0, frame: f = frame, colour = nu
   frame = f; layout();
   const t = performance.now(); await renderer.renderAsync(scene, cam); renderer.render(scene, cam); dirty = false; window.lastRenderMs = Math.round(performance.now() - t); console.log("render", window.lastRenderMs, "ms");
   return renderer.domElement.toDataURL("image/png");   // read in the same task as the draw: no compositor screenshot (it crashed the GPU process under swiftshader)
+};
+window.hairParts = (core, rim) => { for (const e of people) if (e.hair && e.hair.h2) { e.hair.h2.group.children[0].visible = !!core; e.hair.h2.group.children[1].visible = !!rim; } };   // debugging: draw only the core or only the rim pass
+// cost: one person (index i) alone, framed close, hair bald | before | after, N frames each synced to the GPU (WebGL 2: a 1-pixel readback; WebGPU: the queue's work done); returns ms per frame
+window.bench = async ({ i = 0, mode = "after", frames = 150, warm = 20 } = {}) => {
+  renderer.setAnimationLoop(null); setVersion(mode === "before" ? "before" : "after");
+  for (const [j, e] of people.entries()) if (e.hair) { const v = j === i ? mode : "bald"; e.hair.h1.group.visible = v === "before"; if (e.hair.h2) e.hair.h2.group.visible = v === "after"; if (v === "after" && !e.hair.h2) e.hair.h1.group.visible = true; }
+  frame = "close"; Q.set("count", "1"); first = w0 = i; yaw = 0; turning = false; layout();
+  const px = new Uint8Array(4), gl = renderer.backend.gl, q = renderer.backend.device && renderer.backend.device.queue;
+  const sync = async () => { if (gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); else await q.onSubmittedWorkDone(); };
+  const ts = [];
+  for (let n = 0; n < warm + frames; n++) { const t = performance.now(); renderer.render(scene, cam); await sync(); if (n >= warm) ts.push(performance.now() - t); }
+  ts.sort((a, b) => a - b);
+  return { i, mode, backend: gl ? "webgl2" : "webgpu", median: +ts[ts.length >> 1].toFixed(3), p10: +ts[Math.floor(ts.length * 0.1)].toFixed(3), p90: +ts[Math.floor(ts.length * 0.9)].toFixed(3), tris: renderer.info.render.triangles, draws: renderer.info.render.drawCalls };
 };
 window.tuneHair = (o) => { for (const e of people) if (e.hair) e.hair.tune(o); };
 window.lineup = { buildMs: +buildMs.toFixed(0), backend: renderer.backend.isWebGPUBackend ? "webgpu" : "webgl2", samples: renderer.samples,

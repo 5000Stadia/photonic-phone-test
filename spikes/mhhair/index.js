@@ -102,7 +102,7 @@ export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey 
     // the shell's own normal may face either way (double-sided): orient it outward from the head, then blend in the radial direction
     let rx = pos[3 * i] - c[0], ry = pos[3 * i + 1] - c[1], rz = pos[3 * i + 2] - c[2];
     const rl = Math.hypot(rx, ry, rz) || 1; rx /= rl; ry /= rl; rz /= rl;
-    const sg = nx * rx + ny * ry + nz * rz < 0 ? -1 : 1, k = 0.5 * (1 - rtf[i]);
+    const sg = nx * rx + ny * ry + nz * rz < 0 ? -1 : 1, k = style.version === 2 ? 0.5 * (1 - rtf[i]) * 0.6 + 0.3 + 0.4 * Math.min(1, Math.max(0, (pos[3 * i + 1] - (top - 0.12 * r.height)) / (0.06 * r.height))) : 0.5 * (1 - rtf[i]);   // v2: rounder, nearer the head's own normal toward the crown, where overlapping panels otherwise make glinting steps
     nx = nx * sg + rx * k; ny = ny * sg + ry * k; nz = nz * sg + rz * k;
     const l = Math.hypot(nx, ny, nz) || 1;
     nor[3 * i] = nx / l; nor[3 * i + 1] = ny / l; nor[3 * i + 2] = nz / l;
@@ -154,7 +154,7 @@ export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey 
   geo.setAttribute("uv", new THREE.BufferAttribute(UVs, 2)); geo.setAttribute("rt", new THREE.BufferAttribute(RT, 1));
   if (v2) { geo.setAttribute("hl", new THREE.BufferAttribute(HL, 1)); geo.setAttribute("sp", new THREE.BufferAttribute(SP, 3)); }
   geo.setIndex(new THREE.BufferAttribute(IDX, 1));
-  const mats = v2 ? hairMaterials2(THREE, renderer, style.atlas, tune) : hairMaterials(THREE, renderer, style.atlas, { strand, ...tune });
+  const mats = v2 ? hairMaterials2(THREE, renderer, style.atlas, { ...(m.shading || {}), ...tune }) : hairMaterials(THREE, renderer, style.atlas, { strand, ...tune });
   mats.set(tip, grey);
   const core = new THREE.Mesh(geo, mats.core), rim = new THREE.Mesh(geo, mats.rim);
   core.renderOrder = 0; rim.renderOrder = 1;

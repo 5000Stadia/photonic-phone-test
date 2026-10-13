@@ -23,6 +23,7 @@ CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (text in `../makehum
 hair is fitted to each person's body at run time (the shell's vertices are moved with the person), triangulated, and its painted texture is reduced
 to a 1024 px greyscale strand atlas (the original colours are not kept; the person's hair colour is applied instead). Wherever the lineup page
 shows these two styles it labels them with the author and licence.
+(v2, 2026-10-13: the improved versions use an atlas rebuilt by `tools/mh/hair-pack2.py`, which keeps each original's coverage and painted tone and adds generated clump and lock-tip patterns; the originals' texture and mesh are otherwise as above.)
 
 ## Changes made to every asset
 

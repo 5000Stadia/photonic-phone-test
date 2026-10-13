@@ -40,7 +40,8 @@ export function strays(pos, nor, tan, tris, rtf, { seed = 1, count = 28, size = 
     const a = tris[3 * t], b = tris[3 * t + 1], c = tris[3 * t + 2];
     const e1x = pos[3 * b] - pos[3 * a], e1y = pos[3 * b + 1] - pos[3 * a + 1], e1z = pos[3 * b + 2] - pos[3 * a + 2], e2x = pos[3 * c] - pos[3 * a], e2y = pos[3 * c + 1] - pos[3 * a + 1], e2z = pos[3 * c + 2] - pos[3 * a + 2];
     const area = Math.hypot(e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, e1x * e2y - e1y * e2x) / 2, r = (rtf[a] + rtf[b] + rtf[c]) / 3;
-    tot += r < minRt ? 0 : area * r * r; cum[t] = tot;
+    const nz = (nor[3 * a + 2] + nor[3 * b + 2] + nor[3 * c + 2]) / 3;            // not over the face: a flyaway in front of a fringe or a forehead catches the light as a white line
+    tot += (r < minRt || nz > 0.4) ? 0 : area * r * r; cum[t] = tot;
   }
   const SEG = 4, P = [], N = [], Tn = [], UV = [], RT = [], SP = [], IDX = [];
   if (!(tot > 0)) return null;
@@ -54,7 +55,7 @@ export function strays(pos, nor, tan, tris, rtf, { seed = 1, count = 28, size = 
     const nl = Math.hypot(...bn) || 1, tl = Math.hypot(...bt) || 1; for (let i = 0; i < 3; i++) { bn[i] /= nl; bt[i] /= tl; }
     const bi = [bt[1] * bn[2] - bt[2] * bn[1], bt[2] * bn[0] - bt[0] * bn[2], bt[0] * bn[1] - bt[1] * bn[0]];            // across the hair, in the surface
     const rt0 = w * rtf[a] + u * rtf[b] + v * rtf[c];
-    const len = size * (0.02 + 0.04 * rnd()) * (0.6 + 0.8 * rt0), out = size * (0.012 + 0.025 * rnd()), side = (rnd() * 2 - 1) * size * 0.025, curl = (rnd() * 2 - 1) * size * 0.02;
+    const len = size * (0.015 + 0.03 * rnd()) * (0.6 + 0.8 * rt0), out = size * (0.01 + 0.022 * rnd()), side = (rnd() * 2 - 1) * size * 0.03, curl = (rnd() * 2 - 1) * size * 0.03;
     const pts = [];
     for (let j = 0; j <= SEG; j++) {
       const s = j / SEG;
