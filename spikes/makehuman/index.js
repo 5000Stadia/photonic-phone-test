@@ -7,10 +7,10 @@
 //   universal-{gender}-{age}-{muscle}-{weight}   weight = G x A x M x W
 //   neutral-{gender}-{age}                       weight = G x A   (the mean of the three race corners, packed offline)
 // Height and proportions sliders stay at their neutral 0.5 (no targets); the recipe's height is met by uniform scale.
+import { gz, json } from "./load.js";
 const DATA = new URL("./data/", import.meta.url);
-const H = await (await fetch(new URL("body.json", DATA))).json();
-const gz = await (await fetch(new URL("body.bin.gz", DATA))).body.pipeThrough(new DecompressionStream("gzip"));
-const buf = await new Response(gz).arrayBuffer();
+const H = await json(new URL("body.json", DATA));
+const buf = await gz(new URL("body.bin.gz", DATA));
 
 const N = H.vertices;
 let off = 0;
@@ -61,7 +61,7 @@ export function weights(r) {
   const G = split(Math.min(1, Math.max(0, r.sex)), [["female", 0], ["male", 1]]);
   const A = split(ageValue(r.age), [["baby", 0], ["child", 0.1875], ["young", 0.5], ["old", 1]]);
   const lv = [["min", 0], ["average", 0.5], ["max", 1]];
-  const M = split(0.5, lv);                              // muscle: the bench recipe has none, so average
+  const M = split(0.15 + 0.7 * (r.muscle ?? 0.5), lv);   // muscle 0..1 -> 0.15..0.85, as build (the bench recipe has none: average)
   const W = split(0.15 + 0.7 * r.build, lv);             // build 0..1 -> weight 0.15..0.85 (the extremes are caricatures)
   const w = [];
   for (const [g, wg] of Object.entries(G)) for (const [a, wa] of Object.entries(A)) {
@@ -88,23 +88,38 @@ export function bake(r) {
 // the seam copies; positions of the copies follow their originals. Call after anything moves the body's vertices (age,
 // identity and the arm pose do) in place of computeVertexNormals(), which on the drawn mesh would split every seam.
 export function settleBody(geo) {
-  const p = geo.attributes.position.array, n = geo.attributes.normal.array;
-  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; p[a] = p[b]; p[a + 1] = p[b + 1]; p[a + 2] = p[b + 2]; }
-  n.fill(0, 0, BODY * 3);
-  for (let t = 0; t < INDEX.length; t += 3) {
-    const a = INDEX[t] * 3, b = INDEX[t + 1] * 3, c = INDEX[t + 2] * 3;
-    const cx = p[c] - p[b], cy = p[c + 1] - p[b + 1], cz = p[c + 2] - p[b + 2], ax = p[a] - p[b], ay = p[a + 1] - p[b + 1], az = p[a + 2] - p[b + 2];
-    const nx = cy * az - cz * ay, ny = cz * ax - cx * az, nz = cx * ay - cy * ax;
-    for (const o of [a, b, c]) { n[o] += nx; n[o + 1] += ny; n[o + 2] += nz; }
-  }
-  for (let i = 0; i < BODY * 3; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
-  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; n[a] = n[b]; n[a + 1] = n[b + 1]; n[a + 2] = n[b + 2]; }
+  settleArrays(geo.attributes.position.array, geo.attributes.normal.array);
   geo.attributes.position.needsUpdate = true; geo.attributes.normal.needsUpdate = true;
 }
+// The same on plain arrays (the drawn body's positions and normals, UVN x 3 each), for callers with no geometry (src/people/bodies.js).
+// The triangles are summed in doubles in module scratch and rounded once (the f32 add per triangle corner was twice the time of the rest of the
+// near body's build), normalised with a sqrt (Math.hypot is not the same on every engine): + - * / and sqrt only.
+const P64 = new Float64Array(BODY * 3), N64 = new Float64Array(BODY * 3);
+export function settleArrays(p, n) {
+  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; p[a] = p[b]; p[a + 1] = p[b + 1]; p[a + 2] = p[b + 2]; }
+  for (let i = 0; i < BODY * 3; i++) P64[i] = p[i];
+  N64.fill(0);
+  for (let t = 0; t < INDEX.length; t += 3) {
+    const a = INDEX[t] * 3, b = INDEX[t + 1] * 3, c = INDEX[t + 2] * 3;
+    const cx = P64[c] - P64[b], cy = P64[c + 1] - P64[b + 1], cz = P64[c + 2] - P64[b + 2], ax = P64[a] - P64[b], ay = P64[a + 1] - P64[b + 1], az = P64[a + 2] - P64[b + 2];
+    const nx = cy * az - cz * ay, ny = cz * ax - cx * az, nz = cx * ay - cy * ax;
+    N64[a] += nx; N64[a + 1] += ny; N64[a + 2] += nz; N64[b] += nx; N64[b + 1] += ny; N64[b + 2] += nz; N64[c] += nx; N64[c + 1] += ny; N64[c + 2] += nz;
+  }
+  for (let i = 0; i < BODY * 3; i += 3) { const x = N64[i], y = N64[i + 1], z = N64[i + 2], l = Math.sqrt(x * x + y * y + z * z) || 1; n[i] = x / l; n[i + 1] = y / l; n[i + 2] = z / l; }
+  if (SEAM) for (let j = 0; j < SEAM.length; j++) { const a = (BODY + j) * 3, b = SEAM[j] * 3; n[a] = n[b]; n[a + 1] = n[b + 1]; n[a + 2] = n[b + 2]; }
+}
+
+// What the near tier (src/people/bodies.js) builds its own mesh from: the drawn body's triangles, the base layer's (packed vertex
+// indices, vertices [start, start + count)), the eye helpers' ranges, and the drawn body's count.
+export const BODY_VERTICES = BODY;
+export const DRAWN_INDEX = UV_INDEX ?? INDEX;
+export const BASE_LAYER = GARMENT ? { index: GARMENT, start: H.garment.vertices[0], count: H.garment.vertices[1] } : null;
+export const EYES = H.eyes;
 
 // Standing rule: no person is ever rendered unclothed, at any age. Without the base layer, build() refuses.
 const CLOTH = "#5d6670";   // one neutral, opaque cloth colour
 const OFFSET = 0.004;      // the layer sits this share of the height outside the tights helper's own fit, against z-fighting
+export const LAYER_OFFSET = OFFSET;
 
 export function build(THREE, r) {
   if (!GARMENT) throw new Error("makehuman: base layer missing from the packed data; refusing to draw an unclothed person");

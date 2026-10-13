@@ -46,14 +46,14 @@ const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
 // hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
 // blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
 // one pixel read back after each render, so render() covers the GPU's whole frame).
-// Fifth run (after the fourth, 2026-10-13: only opaque hair and plain skin together brought her from ~14 ms to ~6). Both fixes
-// built: her skin baked once into her own texture (skinbake), and MakeHuman hair shells with an opaque core and an
-// alpha-to-coverage rim (mhbob, mhlong, mhupdo: spikes/mhhair, the hairstyle lineup's styles). All GPU-synced, in-material MSAA.
-const NB = ["own", "near", "inline", "sync"];
-const VARIANTS = [["crowd only", ["own", "inline", "sync"], [100, 300]], ["near person, as now", NB, [100]],
-  ["baked skin", [...NB, "skinbake"], [100]], ["baked skin, hair fully opaque (a bound)", [...NB, "skinbake", "hairopaque"], [100]],
-  ["baked skin, hair hidden", [...NB, "skinbake", "bald"], [100]], ["baked skin, bob (core + rim)", [...NB, "skinbake", "mhbob"], [100, 300]],
-  ["baked skin, long (core + rim)", [...NB, "skinbake", "mhlong"], [100]], ["baked skin, updo (core + rim)", [...NB, "skinbake", "mhupdo"], [100]]];
+// Fifth run (2026-10-13): baked skin and the MakeHuman hair shells brought her to about the crowd's own cost.
+// Sixth run (after Kabe moved to iOS 26, 2026-10-13: Safari now offers WebGPU, but every run so far pinned WebGL2). The same
+// crowd and near person on both backends, side by side ("wgpu": not pinned to WebGL2). WebGPU has no pixel read-back sync, so
+// its rows also time each frame's submit to the queue's "work done" (GPU done), the GPU's own frame there.
+const NB = ["own", "near", "inline", "sync"], NEARNOW = [...NB, "skinbake", "mhbob"];
+const VARIANTS = [["crowd only, WebGL2", ["own", "inline", "sync"], [300, 1000]], ["crowd only, WebGPU", ["own", "inline", "sync", "wgpu"], [300, 1000]],
+  ["near person (baked skin, bob), WebGL2", NEARNOW, [100, 300]], ["near person (baked skin, bob), WebGPU", [...NEARNOW, "wgpu"], [100, 300]],
+  ["crowd only, 3000, WebGL2", ["own", "inline", "sync"], [3000]], ["crowd only, 3000, WebGPU", ["own", "inline", "sync", "wgpu"], [3000]]];
 const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
 const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
@@ -67,7 +67,7 @@ const store = {
 };
 const WARM = [0, 1];                                       // the variants measured again at 300 once the phone is warm
 const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
-const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], "gl", ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
+const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], ...(VARIANTS[v][1].includes("wgpu") ? [] : ["gl"]), ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
 const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
 const warmGo = (k) => { location.hash = ["c2c", 300, "gl", ...VARIANTS[WARM[k]][1], ...QUICK, `suiteW${k}`].join("-"); location.reload(); };
 const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now(), fixed: true }); suiteGo(0, 0); };
@@ -79,7 +79,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 2 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 3 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -430,7 +430,15 @@ const mb = b => (b / 1048576).toFixed(2) + " MB";
 // sync: read one pixel back after each render, so render() covers the GPU's whole frame and vsync can't hide it
 // (iOS WebGL 2 has no timer queries; this costs the pipelining, so it reads a little high: for cost checks only)
 const SYNC = FLAGS.includes("sync"), px = new Uint8Array(4);
-const syncGpu = () => { const gl = renderer.backend.gl; if (gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
+// WebGPU has no read-back sync: each frame's submit is timed to the queue's work done. While the GPU keeps up, that latency is
+// its frame; once it falls behind the queue backs up and latency only grows, so the gap between successive frames finishing
+// is its frame instead. GPU done is the smaller of the two medians.
+const gpuDone = [], gpuEnds = [];
+const syncGpu = () => { const gl = renderer.backend.gl; if (gl) { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return; }
+  const q = renderer.backend.device?.queue; if (!q) return; const t = performance.now();
+  q.onSubmittedWorkDone().then(() => { const e = performance.now(); gpuDone.push(e - t); gpuEnds.push(e); }); };
+const gpuFrame = () => { if (gpuEnds.length < 3) return undefined; const gaps = gpuEnds.slice(1).map((e, i) => e - gpuEnds[i]);
+  return +Math.min(pct(gpuDone, 0.5), pct(gaps, 0.5)).toFixed(2); };
 function frame() {
   const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), frameMs = now - last; last = now;
   const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near && !FLAGS.includes("still")) nearHair(near, dt); const b = performance.now();
@@ -495,11 +503,13 @@ function r9(now, frameMs, cpuMs, rndMs) {
       if (t < 15 && (n < 2 * k || Math.abs(med(settle.slice(n - 2 * k, n - k)) - med(settle.slice(n - k))) > 0.15 * med(settle.slice(n - k)))) return;
       r9t1 = t;
     }
+    if (!r9frames.length) { gpuDone.length = 0; gpuEnds.length = 0; }
     r9frames.push(frameMs); r9cpu.push(cpuMs); r9rnd.push(rndMs);
     if (t - r9t1 < 5) return;
     r9done = true; renderer.setAnimationLoop(null);
     const sf = stats(r9frames), row = { n: N, ...sf, settledAt: +r9t1.toFixed(1), cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
-      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs) };
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs), backend,
+      ...(gpuEnds.length >= 3 ? { gpuDone: gpuFrame() } : {}), ...(FLAGS.includes("wgpu") && backend !== "webgpu" && lastErr ? { err: lastErr.slice(0, 120) } : {}) };
     const b = store.all();
     if (STAGE === "warm") {
       const k = +SUITE.slice(1); (b.warm ||= []).push({ v: WARM[k], name: VARIANTS[WARM[k]][0], ...row }); store.save(b);
@@ -565,7 +575,7 @@ function reportText(b) {
   const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
     "Each variant at fixed counts: people: median / slowest 5% ms, render() ms (GPU-synced: render() is the whole GPU frame)"];
   VARIANTS.forEach(([name], v) => {
-    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}`).join(" · ")); return; }
+    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
     const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
     L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
     if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);

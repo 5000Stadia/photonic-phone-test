@@ -7,7 +7,7 @@
 
 import { resolve } from "../traits/resolve.js";
 import { uniform, seedOf } from "../traits/stream.js";
-import { paramsFor, build } from "./bodies.js";
+import { paramsFor, build, buildNear, farBody } from "./bodies.js";
 import { makeWalker } from "./walk.js";
 
 export const TIERS = ["near", "mid", "far"];
@@ -65,12 +65,14 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     };
     rec.half = Math.max(0.18, 0.13 * rec.height);
     // Built on first need, so people never seen or walked cost nothing beyond their resolution.
-    let body = null, params = null, walker;
+    let body = null, params = null, far = null, walker;
     Object.defineProperties(rec, {
       bodyParams: { get: () => (params ??= paramsFor(res.values, res.derived)) },
       body: { get: () => (body ??= build(rec.bodyParams)) },
-      walker: { get: () => (walker !== undefined ? walker : (walker = basis ? makeWalker(rec.body.joints.J, {
-        age: res.values.age, sex: res.values.sex === "male" ? 1 : res.values.sex === "female" ? -1 : 0, seed: seedOf(`${seed}:${id}:walk`) }, basis) : null)) },
+      buildNear: { value: () => buildNear(rec.bodyParams) },        // the near tier's full body, built when drawn near, not kept
+      far: { get: () => (far ??= farBody(rec.bodyParams)) },       // the far tier's person and the walker's joints, from the table: no body is built for them
+      walker: { get: () => (walker !== undefined ? walker : (walker = basis ? makeWalker(rec.far.J, {
+        age: res.values.age, sex: res.values.sex === "male" ? 1 : res.values.sex === "female" ? -1 : 0, seed: seedOf(`${seed}:${id}:walk`), height: rec.height }, basis) : null)) },
       speed: { get: () => rec.walker ? rec.walker.v : 1.3 },
       rate: { get: () => rec.walker ? rec.walker.f : 0.9 },
       built: { get: () => body !== null },

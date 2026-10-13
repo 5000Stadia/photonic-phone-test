@@ -1,23 +1,28 @@
-// The population's drawing (R4; design/r4-plan.md): three instanced draws, one per tier, all reading one shared walk
-// texture, so no tier can disagree about anyone's step.
-//   far   the template body plus each person's coefficients on a 16-direction morph basis (C2c, R2's crowd probe)
-//   mid   each person's exact rest shape, read from a texture of slots (C3t)
-//   near  the same exact shapes in their own draw, the slot R5 fills with the near body, hair and face
-// The far tier morphs at the mean height and then scales: the stand-in body is exactly linear in height, so this
-// leaves the morph only the other parameters (error against the exact body over 300 people: median 0.24 cm, p95
-// 0.9 cm, worst 1.2 cm, against 7.5 cm for a baby when height was a morph direction).
+// The population's drawing (R4, R5; design/r4-plan.md, r5-plan.md): three instanced draws, one per tier, all reading one shared walk
+// texture, so no tier can disagree about anyone's step. Two topologies: the reduced mesh (1.5k vertices) for far and mid, the full
+// drawn body with its base layer and eyes (about 16k) for near.
+//   far   the template body plus each person's coefficients on a 16-direction morph basis, at unit height, then an exact height
+//         scale (C2c, R2's crowd probe; fitted by tools/people/far-fit.mjs on bodies after the rig's repose)
+//   mid   each person's exact reduced rest shape, read from a texture of slots (C3t)
+//   near  each person's exact full rest shape, from its own slot texture, since its vertex count differs
+// Colour is per vertex (`paint`, from bodies.js): skin vertices take the person's own skin colour, cloth vertices (the base layer, as
+// a flag on the reduced mesh and as its own vertices on the full body) take the garment tint, and eyes carry their own colour.
+// The far tier's morph basis is fitted on the walking stance, so the three tiers stand alike; the bodies skin on the rig's 21 bones.
 // Each frame, population.tick() sorts the seen into tiers; update() writes each tier's people into its agent texture
-// (position, heading, phase, slots, tint) and sets its count. People get a walk slot the first time they're seen:
+// (position, heading, phase, slots, tint, skin) and sets its count. People get a walk slot the first time they're seen:
 // their own walker baked into 32 frames (src/people/walk.js), at most `bakeBudgetMs` of baking a frame.
 
-import { Fn, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross } from "three/tsl";
-import { TEMPLATE, B, farCoefs, morphBasis } from "./bodies.js";
+import { Fn, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross, mix, step } from "three/tsl";
+import { TEMPLATE, NEAR, B, morphBasis } from "./bodies.js";
 import { bakeOne, TEXELS_PER_PERSON } from "./walk.js";
+import { half, bitsOf, packHalf } from "./half.js";
 
-const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
+const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048, TEXELS = 4;      // an instance takes 4 agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin
 
 export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4 } = {}) {
-  const V = TEMPLATE.position.length / 3;
+  // nobody is ever drawn unclothed: both topologies must carry the base layer's cloth flag
+  for (const [name, t] of [["reduced", TEMPLATE], ["near", NEAR]]) if (!t.cloth.some((c) => c)) throw new Error(`people: the ${name} body has no base layer; refusing to draw an unclothed person`);
+  const V = TEMPLATE.V;                                       // far and mid share the reduced mesh; near has its own count (NEAR.V)
   const group = new THREE.Group(); group.name = "people";
   const half16 = (src) => { const o = new Uint16Array(src.length); for (let i = 0; i < src.length; i++) o[i] = THREE.DataUtils.toHalfFloat(src[i]); return o; };
 
@@ -27,11 +32,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const perRow = Math.floor(WALK_W / (F + 1)), walkW = perRow * (F + 1), rowsFor = (n) => Math.ceil(n / perRow) * 2 * B;
   let walkCap = Math.min(capacity, perRow), walkH = rowsFor(walkCap);
   let walkData = new Uint16Array(walkW * walkH * 4);
-  const bakeRows = new Float32Array((F + 1) * 2 * B * 4);
+  const bakeRows = new Float32Array((F + 1) * 2 * B * 4), bakeBits = bitsOf(bakeRows);
   const walkTexture = (data, h) => { const t = new THREE.DataTexture(data, walkW, h, THREE.RGBAFormat, THREE.HalfFloatType);   // half floats: filterable on every WebGL2
     t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; };
   let walkTex = walkTexture(walkData, walkH);
-  const walkHU = uniform(walkH), walkNodes = [], restNodes = [];
+  const walkHU = uniform(walkH), walkNodes = [];
   function growWalk() {
     if (walkCap >= capacity) return false;
     walkCap = Math.min(capacity, walkCap * 2); const h = rowsFor(walkCap), d = new Uint16Array(walkW * h * 4);
@@ -52,48 +57,71 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const normalDeltaTex = new THREE.DataTexture(half16(nd), dW, dH, THREE.RGBAFormat, THREE.HalfFloatType); normalDeltaTex.needsUpdate = true;
   const deltaTex = new THREE.DataTexture(half16(dd), dW, dH, THREE.RGBAFormat, THREE.HalfFloatType); deltaTex.needsUpdate = true;
 
-  // ---- mid and near: exact rest shapes in slots of V vertices x 2 texels (position, normal) ----
-  const restRows = (n) => Math.ceil(n * V * 2 / REST_W);
-  let restCap = Math.min(exactCapacity, 16), restData = new Uint16Array(REST_W * restRows(restCap) * 4);
-  const restTexture = (data) => new THREE.DataTexture(data, REST_W, data.length / 4 / REST_W, THREE.RGBAFormat, THREE.HalfFloatType);
-  let restTex = restTexture(restData);
-  function growRest() {
-    restCap = Math.min(exactCapacity, restCap * 2); const d = new Uint16Array(REST_W * restRows(restCap) * 4);
-    d.set(restData); restData = d;
-    const old = restTex; restTex = restTexture(restData); restTex.needsUpdate = true; for (const n of restNodes) n.value = restTex; old.dispose();
+  // ---- mid and near: exact rest shapes in slots of V vertices x 2 texels (position, normal), one store per topology ----
+  // Each store starts small and doubles when full (as the walk texture does), keeping every slot where it was.
+  function restStore(Vs, capMax, first) {
+    const rows = (n) => Math.ceil(n * Vs * 2 / REST_W), tex = (data) => new THREE.DataTexture(data, REST_W, data.length / 4 / REST_W, THREE.RGBAFormat, THREE.HalfFloatType);
+    const st = { V: Vs, cap: Math.min(capMax, first), capMax, nodes: [], slots: new Map(), lru: [], free: [], next: 0, dirty: false };
+    st.data = new Uint16Array(REST_W * rows(st.cap) * 4); st.tex = tex(st.data);
+    st.grow = () => {
+      st.cap = Math.min(capMax, st.cap * 2); const d = new Uint16Array(REST_W * rows(st.cap) * 4);
+      d.set(st.data); st.data = d;
+      const old = st.tex; st.tex = tex(d); st.tex.needsUpdate = true; for (const n of st.nodes) n.value = st.tex; old.dispose();
+    };
+    // the slot of a person's exact shape, filled from body() when they have none; least recently drawn is evicted when full
+    st.slot = (rec, body) => {
+      let s = st.slots.get(rec.id);
+      if (s === undefined) {
+        if (st.free.length) s = st.free.pop();
+        else if (st.next < capMax) { if (st.next >= st.cap) st.grow(); s = st.next++; }
+        else { const old = st.lru.shift(); s = st.slots.get(old); st.slots.delete(old); }
+        const b = body(), d = st.data, pu = bitsOf(b.position), nu = bitsOf(b.normal);
+        for (let v = 0, o = s * Vs * 8; v < Vs; v++, o += 8) {
+          const i = v * 3;
+          d[o] = half(pu[i]); d[o + 1] = half(pu[i + 1]); d[o + 2] = half(pu[i + 2]);
+          d[o + 4] = half(nu[i]); d[o + 5] = half(nu[i + 1]); d[o + 6] = half(nu[i + 2]);
+        }
+        st.slots.set(rec.id, s); st.dirty = true;
+      } else st.lru.splice(st.lru.indexOf(rec.id), 1);
+      st.lru.push(rec.id);
+      return s;
+    };
+    st.release = (rec) => { if (st.slots.has(rec.id)) { st.free.push(st.slots.get(rec.id)); st.slots.delete(rec.id); st.lru.splice(st.lru.indexOf(rec.id), 1); } };
+    return st;
   }
-  let restDirty = false;
-  const exactSlots = new Map(), exactLRU = [], freeExact = [];      // id -> slot; least recently drawn first
-  let nextExact = 0;
+  // mid and near are drawn together in a frame at most as many as there are: nobody drawn this frame is evicted
+  const stores = { mid: restStore(V, Math.max(1, exactCapacity - nearCapacity), 16), near: restStore(NEAR.V, nearCapacity, 2) };
 
-  // ---- per-tier agent textures: 3 texels an instance: [x, z, heading, phase], [walk slot, exact slot, y, 0], tint ----
+  // ---- per-tier agent textures: TEXELS an instance ----
   const tiers = {};
-  // mid and near together never need more exact slots than there are, so nobody drawn this frame is evicted
-  for (const [name, cap] of [["far", capacity], ["mid", exactCapacity - nearCapacity], ["near", nearCapacity]]) {
-    const data = new Float32Array(3 * cap * 4), tex = new THREE.DataTexture(data, 3, cap, THREE.RGBAFormat, THREE.FloatType);
-    const g = new THREE.BufferGeometry();
-    for (const k of ["position", "normal"]) g.setAttribute(k, new THREE.BufferAttribute(TEMPLATE[k], 3));
-    g.setAttribute("skinIndex", new THREE.BufferAttribute(TEMPLATE.skinIndex, 4)); g.setAttribute("skinWeight", new THREE.BufferAttribute(TEMPLATE.skinWeight, 4));
-    g.setIndex(new THREE.BufferAttribute(TEMPLATE.index, 1));
+  for (const [name, cap] of [["far", capacity], ["mid", stores.mid.capMax], ["near", nearCapacity]]) {
+    const data = new Float32Array(TEXELS * cap * 4), tex = new THREE.DataTexture(data, TEXELS, cap, THREE.RGBAFormat, THREE.FloatType);
+    const T = name === "near" ? NEAR : TEMPLATE, g = new THREE.BufferGeometry();
+    // near has no template shape (each person's rest shape is read from the store): zeros stand in for the attributes three needs
+    for (const k of ["position", "normal"]) g.setAttribute(k, new THREE.BufferAttribute(T[k] ?? new Float32Array(T.V * 3), 3));
+    g.setAttribute("skinIndex", new THREE.BufferAttribute(T.skinIndex, 4)); g.setAttribute("skinWeight", new THREE.BufferAttribute(T.skinWeight, 4));
+    g.setAttribute("paint", new THREE.BufferAttribute(T.paint, 4));
+    g.setIndex(new THREE.BufferAttribute(T.index, 1));
     let coef = null;
     if (name === "far") { coef = []; for (let c = 0; c < 4; c++) { const at = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4); at.setUsage(THREE.DynamicDrawUsage); g.setAttribute("coef" + c, at); coef.push(at); } }
-    const mesh = new THREE.Mesh(g, material(THREE, tex, name === "far" ? "morph" : "exact"));
+    const mesh = new THREE.Mesh(g, material(THREE, tex, name === "far" ? "morph" : "exact", stores[name], name === "near"));
     mesh.count = 0; mesh.frustumCulled = false; mesh.name = "people-" + name; group.add(mesh);
     tiers[name] = { cap, data, tex, mesh, coef };
   }
 
-  function material(THREE, agentTex, shape) {
-    const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75 });
+  function material(THREE, agentTex, shape, store, double) {
+    const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75, side: double ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside
     const i = int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
-    m.colorNode = varying(textureLoad(agentTex, ivec2(2, i)).rgb);
+    const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the garment's tint, 2 its own colour (eyes)
+    m.colorNode = varying(mix(mix(textureLoad(agentTex, ivec2(3, i)).rgb, textureLoad(agentTex, ivec2(2, i)).rgb, step(0.5, paint.w)), paint.rgb, step(1.5, paint.w)));
     const walkNode = texture(walkTex); walkNodes.push(walkNode);
     m.positionNode = Fn(() => {
       const a0 = textureLoad(agentTex, ivec2(0, i)).toVar(), a1 = textureLoad(agentTex, ivec2(1, i)).toVar();
       let x0, n0;
       if (shape === "exact") {
-        const gi = int(a1.y).mul(V).add(int(vertexIndex)).mul(2).toVar();
-        const rp = textureLoad(restTex, ivec2(gi.mod(REST_W), gi.div(REST_W))), rn = textureLoad(restTex, ivec2(gi.add(1).mod(REST_W), gi.add(1).div(REST_W)));
-        restNodes.push(rp, rn);
+        const gi = int(a1.y).mul(store.V).add(int(vertexIndex)).mul(2).toVar();
+        const rp = textureLoad(store.tex, ivec2(gi.mod(REST_W), gi.div(REST_W))), rn = textureLoad(store.tex, ivec2(gi.add(1).mod(REST_W), gi.add(1).div(REST_W)));
+        store.nodes.push(rp, rn);
         x0 = rp.xyz.toVar(); n0 = rn.xyz.toVar();
       } else {
         x0 = positionLocal.toVar(); n0 = normalLocal.toVar();
@@ -137,48 +165,37 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     if (!w) return false;
     // bake into a one-person block, then into the shared texture as half floats
     bakeOne(w, 0, F, 1, F + 1, bakeRows, tmp);
-    const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B, toH = THREE.DataUtils.toHalfFloat;
-    for (let r = 0; r < 2 * B; r++) for (let c = 0; c <= F; c++) for (let k = 0; k < 4; k++)
-      walkData[((by + r) * walkW + bx + c) * 4 + k] = toH(bakeRows[(r * (F + 1) + c) * 4 + k]);
+    const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
+    for (let r = 0; r < 2 * B; r++) packHalf(walkData, ((by + r) * walkW + bx) * 4, bakeBits, r * (F + 1) * 4, (F + 1) * 4);
     rec.walkSlot = slot; walkDirty = true;
     budgetLeft -= performance.now() - t;
     return true;
   }
 
-  function exactSlot(rec) {
-    let s = exactSlots.get(rec.id);
-    if (s === undefined) {
-      if (freeExact.length) s = freeExact.pop();
-      else if (nextExact < exactCapacity) { if (nextExact >= restCap) growRest(); s = nextExact++; }
-      else { const old = exactLRU.shift(); s = exactSlots.get(old); exactSlots.delete(old); }
-      const b = rec.body, toH = THREE.DataUtils.toHalfFloat;
-      for (let v = 0; v < V; v++) {
-        const o = ((s * V + v) * 2) * 4;
-        for (let a = 0; a < 3; a++) { restData[o + a] = toH(b.position[v * 3 + a]); restData[o + 4 + a] = toH(b.normal[v * 3 + a]); }
-      }
-      exactSlots.set(rec.id, s); restDirty = true;
-    } else exactLRU.splice(exactLRU.indexOf(rec.id), 1);
-    exactLRU.push(rec.id);
-    return s;
-  }
-
-  // tint for the stand-ins: a garment-ish colour from the id (wardrobe comes with R5)
+  // the garment's tint, for now a colour from the rank (the wardrobe comes later in R5); and the person's own skin, from their traits
   const tint = (rec) => { if (!rec.tint) { const c = new THREE.Color().setHSL(rec.rank * 7 % 1, 0.35, 0.45); rec.tint = [c.r, c.g, c.b]; } return rec.tint; };
+  const skin = (rec) => { if (!rec.skin) { const c = new THREE.Color(rec.bodyParams.skin); rec.skin = [c.r, c.g, c.b]; } return rec.skin; };
 
-  function write(name, list) {
-    const T = tiers[name];
+  // Writes a tier's people; returns how many. A person new to the near tier needs their full body built (about 4 ms): when this
+  // frame's budget is spent they are drawn as mid for now (`demoted`), and near from the next frame.
+  function write(name, list, demoted) {
+    const T = tiers[name], store = stores[name];
     let n = 0;
     for (const rec of list) {
       if (n >= T.cap) break;
       if (!walkSlot(rec)) continue;
-      const o = n * 12, ex = name === "far" ? 0 : exactSlot(rec);
+      let ex = 0;
+      if (name === "near") {
+        if (!store.slots.has(rec.id) && budgetLeft <= 0) { demoted.push(rec); continue; }
+        const t = performance.now(); ex = store.slot(rec, () => rec.buildNear()); budgetLeft -= performance.now() - t;
+      } else if (name === "mid") ex = store.slot(rec, () => rec.body);
+      const o = n * TEXELS * 4;
       T.data[o] = rec.pos[0]; T.data[o + 1] = rec.pos[2]; T.data[o + 2] = rec.heading; T.data[o + 3] = rec.phase;
       T.data[o + 4] = rec.walkSlot; T.data[o + 5] = ex; T.data[o + 6] = rec.pos[1];
-      T.data.set(tint(rec), o + 8);
+      T.data.set(tint(rec), o + 8); T.data.set(skin(rec), o + 12);
       if (T.coef) {
-        rec.far ??= farCoefs(rec.bodyParams);
         T.data[o + 7] = rec.far.scale;
-        for (let c = 0; c < 4; c++) T.coef[c].array.set(rec.far.coef.slice(c * 4, c * 4 + 4), n * 4);
+        for (let k = 0; k < KT; k++) T.coef[k >> 2].array[n * 4 + (k & 3)] = rec.far.coef[k];
       }
       n++;
     }
@@ -192,16 +209,18 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     /** Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier. */
     update(sorted) {
       budgetLeft = bakeBudgetMs;
-      const counts = { near: write("near", sorted.near), mid: write("mid", sorted.mid), far: write("far", sorted.far) };
+      const demoted = [], near = write("near", sorted.near, demoted);
+      const counts = { near, mid: write("mid", demoted.length ? demoted.concat(sorted.mid) : sorted.mid), far: write("far", sorted.far) };
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; }
-      if (restDirty) { restTex.needsUpdate = true; restDirty = false; }
+      for (const st of Object.values(stores)) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       return counts;
     },
     /** Free a removed person's slots. */
     release(rec) {
       if (rec.walkSlot !== undefined) { freeWalk.push(rec.walkSlot); rec.walkSlot = undefined; }
-      if (exactSlots.has(rec.id)) { freeExact.push(exactSlots.get(rec.id)); exactSlots.delete(rec.id); exactLRU.splice(exactLRU.indexOf(rec.id), 1); }
+      for (const st of Object.values(stores)) st.release(rec);
     },
-    bytes: () => walkData.byteLength + dd.length + restData.byteLength,     // the two morph textures are half floats
+    // walk texture, the far basis (two half-float textures), the rest slots of both topologies (half floats)
+    bytes: () => walkData.byteLength + dd.length + stores.mid.data.byteLength + stores.near.data.byteLength,
   };
 }

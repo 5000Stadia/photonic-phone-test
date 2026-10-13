@@ -1,50 +1,52 @@
-// The body provider (R4): from a resolved person's traits to a rest shape and joints. Until R5 this is the crowd
-// probe's stand-in body (spikes/crowd/body.js, 16 proportion parameters, 21 bones); R5 swaps in the MakeHuman body
-// behind the same three functions, so nothing that calls them changes.
+// The body provider (R4, R5): from a resolved person's traits to a rest shape and joints. R4 drew the crowd probe's stand-in
+// body here; R5 swapped in MakeHuman's hm08 body behind the same functions, so nothing that calls them changed. The shape itself
+// (the recipe, the bake, the rig's stance, the reduced and near meshes) is shape.js; this file adds the far tier's basis.
 //
 //   paramsFor(values, derived)  the body's parameters from the traits (deterministic: same person, same body)
-//   build(params)               { position, normal, skinIndex, skinWeight, index, joints: { J, ... } }
-//   TEMPLATE                    the shared topology every body has (the instanced tiers draw it)
+//   build(params)               the mid and far tiers' body on the reduced mesh: { position, normal, skinIndex, skinWeight, index, uv, cloth, paint, joints: { J, ... } }
+//   buildNear(params)           the near tier's, on the full drawn body with its base layer and eyes (NEAR is its shared half)
+//   TEMPLATE                    the topology the far and mid tiers draw: the far basis's mean at unit height, with the same shared fields
+//   farCoefs(body)              the far tier's description of a built body: its 16 coefficients and its height as an exact scale
+//   farBody(params)             the same, and the joints, for a person who has no built body: read from a table over the four sliders
+//                               (spikes/makehuman/table.js, built by tools/people/far-table.mjs), a few microseconds instead of the 2 ms bake
+//   morphBasis(which)           the 16 directions, "position" or "normal", over the drawn vertices (what the far tier adds, scaled by coefficients)
 
-import { PARAMS, MEAN, buildBody } from "../body.js";
+import { MID, RED, NEAR, FAR_VERTICES, farVec, build, buildNear, paramsFor, BONES, B } from "./shape.js";
+import { loadFar } from "../spikes/makehuman/reduced.js";
+import { loadFarTable } from "../spikes/makehuman/table.js";
 
-export { BONES, B } from "../body.js";
-export const TEMPLATE = buildBody(MEAN);
+export { BONES, B, NEAR, paramsFor, build, buildNear };
 
-const I = Object.fromEntries(PARAMS.map(([n], i) => [n, i]));
-const z = (values, id) => (typeof values[id] === "number" ? values[id] : 0);
-// a trait z (or a 0–1 amount centred on its usual value) to a parameter, within the probe's ±1.6 spreads
-const set = (p, name, x) => { const [, m, s] = PARAMS[I[name]]; p[I[name]] = m + s * Math.max(-1.6, Math.min(1.6, x)); };
+const FAR = await loadFar("far-1500");
+if (!FAR.header.nScale) throw new Error("bodies: the far pack has no normals; refit it with tools/people/far-fit.mjs");
+if (FAR.header.vertices !== FAR_VERTICES) throw new Error("bodies: the far pack is not for this reduced mesh");
 
-export function paramsFor(values, derived) {
-  const p = MEAN.slice();
-  p[I.height] = Math.max(0.5, (derived["body.height"] ?? 172) / 100);      // metres, from the growth curve and stature z
-  set(p, "leg", z(values, "body.legLength") * 0.8);
-  set(p, "arm", z(values, "body.armLength") * 0.8);
-  set(p, "shoulder", z(values, "body.shoulderWidth") * 0.8 - z(values, "body.MF") * 0.35);   // masculine frames broader
-  set(p, "hip", z(values, "body.hipWidth") * 0.8 + z(values, "body.MF") * 0.35);
-  const fat = (z(values, "body.adiposity") - 0.35) / 0.15, muscle = (z(values, "body.muscularity") - 0.4) / 0.15;
-  set(p, "chest", 0.5 * fat + 0.4 * muscle + z(values, "body.chestDepth") * 0.3);
-  set(p, "belly", 0.9 * fat);
-  set(p, "limb", 0.45 * fat + 0.45 * muscle);
-  set(p, "thigh", 0.5 * fat + 0.4 * muscle);
-  set(p, "head", z(values, "body.headSize") * 0.8);
-  set(p, "neck", z(values, "body.neckLength") * 0.8);
-  set(p, "foot", z(values, "body.footSize") * 0.8);
-  set(p, "hand", z(values, "body.handSize") * 0.8);
-  set(p, "depth", z(values, "body.chestDepth") * 0.8);
-  set(p, "slope", 0);
-  set(p, "torso", -z(values, "body.legLength") * 0.4);
-  return p;
+// the far vector's values over the drawn vertices: the geometric ones, copies taking their original's, then the eyes
+const drawn = (a) => {
+  const R = RED.R, D = RED.D, o = new Float32Array(MID.V * 3);
+  o.set(a.subarray(0, R * 3)); o.set(a.subarray(R * 3), D * 3);
+  for (let d = R; d < D; d++) { const s = RED.owner[d] * 3; o[d * 3] = o[s]; o[d * 3 + 1] = o[s + 1]; o[d * 3 + 2] = o[s + 2]; }
+  return o;
+};
+export const TEMPLATE = { ...MID, position: drawn(FAR.mean), normal: drawn(FAR.nmean) };
+{ const nn = TEMPLATE.normal; for (let i = 0; i < nn.length; i += 3) { const l = Math.sqrt(nn[i] * nn[i] + nn[i + 1] * nn[i + 1] + nn[i + 2] * nn[i + 2]) || 1; nn[i] /= l; nn[i + 1] /= l; nn[i + 2] /= l; } }
+export const FAR_K = FAR.k;
+const TABLE = await loadFarTable("far-table-1500", FAR);       // refuses a table built for another far pack: re-run tools/people/far-table.mjs
+
+/** The far tier's description of a built body (position at the person's height): coefficients on the basis at unit height, and the
+ *  height as an exact scale. draw.js and the tests share it. */
+export function farCoefs(body) {
+  return { coef: Array.from(FAR.coefs(farVec(body.position), body.height)), scale: body.height };
 }
-
-export const build = (params) => buildBody(params);
-
-// The far tier's description of a body: coefficients on the one-spread morph basis at the mean height, and the height
-// as an exact scale (the stand-in body is linear in height). draw.js and the tests share it.
-export function farCoefs(params) {
-  return { coef: params.map((v, t) => (t === 0 ? 0 : (v - MEAN[t]) / PARAMS[t][2])), scale: params[0] / MEAN[0] };
+/** The far tier's person from the traits alone: { coef (Float32Array, the far basis at unit height), scale (the height, exact), J (the rig's 21 joints
+ *  at the person's height, for the walker) }. Interpolated from the table; within a few millimetres of farCoefs(build(params)) and its joints. */
+export function farBody(params) {
+  const o = TABLE.at(params.sex, params.age, params.muscle, params.build), k = TABLE.k, h = params.height, coef = new Float32Array(k), J = new Array(B);
+  for (let i = 0; i < k; i++) coef[i] = o[i];
+  for (let b = 0; b < B; b++) J[b] = [o[k + 3 * b] * h, o[k + 3 * b + 1] * h, o[k + 3 * b + 2] * h];
+  return { coef, scale: h, J };
 }
 export function morphBasis(which = "position") {
-  return PARAMS.map((_, t) => { const q = MEAN.slice(); q[t] += PARAMS[t][2]; const b = buildBody(q); return b[which].map((x, i) => x - TEMPLATE[which][i]); });
+  const src = which === "position" ? FAR.basis : FAR.nbasis, n = FAR_VERTICES * 3;
+  return Array.from({ length: FAR.k }, (_, t) => drawn(src.subarray(t * n, (t + 1) * n)));
 }

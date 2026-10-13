@@ -166,31 +166,58 @@ export function params(recipe, B) {
 }
 
 // ---------- pose: params, phase -> joint angles (degrees; trans in metres) ----------
-function ev(P, d, ph, s) {
-  const B = P.B, [o, K] = B.layout[d], c = P.c;
-  let dyn = 0;
-  const w = 2 * Math.PI * ph;
-  for (let k = 1; k <= K; k++) dyn += c[o + 2 * k - 1] * Math.cos(k * w) + c[o + 2 * k] * Math.sin(k * w);
-  let sc = P.scl[d] ?? 1, of = P.off[d] || 0;
-  if (s) { const [so, ss] = P.side[s]; of += so[d] || 0; sc *= ss[d] ?? 1; }
-  if (d === "hip_flex" || d === "knee_flex") sc *= P.legGain;
-  return c[o] + of + sc * dyn;
+// ---------- a person's degrees of freedom as a plan, evaluated by index ----------
+// ev() per DoF by name (a dictionary lookup or five a call) was most of a pose. planFor() lists, once per person, each DoF's coefficient offset,
+// harmonics, constant (the mean plus the layers' offsets) and swing scale; evalPlan() then sums them at a phase. The same sums in the same order
+// as before (constant, plus scale times the harmonics), so the same bits. Channels: the `centre` DoFs, then `limb` for the left leg and arm, then
+// for the right. The legs' swing gain is applied at evaluation (calibrate() changes it), the sides' phases are half a cycle apart.
+export const CENTRE = ["pelvis_tilt", "pelvis_obl", "pelvis_rot", "spine_flex", "spine_lat", "spine_rot", "neck_flex", "neck_lat", "neck_rot", "trans_fwd", "trans_lat", "trans_up"];
+export const LIMB = ["hip_flex", "hip_add", "hip_rot", "knee_flex", "ankle_dors", "foot_prog", "shoulder_flex", "shoulder_abd", "shoulder_rot", "elbow_flex"];
+export function planFor(P, centre = CENTRE, limb = LIMB) {
+  const lay = P.B.layout, n = centre.length + 2 * limb.length, o = new Int32Array(n), K = new Int32Array(n), leg = new Uint8Array(n), base = new Float64Array(n), sc = new Float64Array(n);
+  const put = (i, d, side) => {
+    const [oo, kk] = lay[d];
+    let of = P.off[d] || 0, w = P.scl[d] ?? 1;
+    if (side) { const [so, ss] = P.side[side]; of += so[d] || 0; w *= ss[d] ?? 1; }
+    o[i] = oo; K[i] = kk; base[i] = P.c[oo] + of; sc[i] = w; leg[i] = d === "hip_flex" || d === "knee_flex" ? 1 : 0;
+  };
+  centre.forEach((d, i) => put(i, d));
+  limb.forEach((d, i) => { put(centre.length + i, d, "L"); put(centre.length + limb.length + i, d, "R"); });
+  let kmax = 0; for (const k of K) kmax = Math.max(kmax, k);
+  if (kmax > 32) throw new Error("gait: more than 32 harmonics a DoF");
+  return { n, nCentre: centre.length, nLimb: limb.length, o, K, leg, base, sc, c: P.c, kmax };
 }
-const LIMB = ["hip_flex", "hip_add", "hip_rot", "knee_flex", "ankle_dors", "foot_prog", "shoulder_flex", "shoulder_abd", "shoulder_rot", "elbow_flex"];
+const TRIG_L = new Float64Array(64), TRIG_R = new Float64Array(64);   // cos(k w), sin(k w), k = 1..kmax, w = 2 pi phase: shared by every DoF at a phase
+function trig(ph, t, kmax) {
+  const w = 2 * Math.PI * ph;
+  for (let k = 1; k <= kmax; k++) { t[2 * k - 2] = Math.cos(k * w); t[2 * k - 1] = Math.sin(k * w); }
+}
+/** The plan's channels at phase p (0..1) into out; the centre DoFs and the left limb at p, the right limb half a cycle on. */
+export function evalPlan(pl, p, out, legGain) {
+  trig(p, TRIG_L, pl.kmax); trig((p + 0.5) % 1, TRIG_R, pl.kmax);
+  const { o, K, leg, base, sc, c } = pl, nl = pl.nCentre + pl.nLimb;
+  for (let i = 0; i < pl.n; i++) {
+    const t = i < nl ? TRIG_L : TRIG_R, oo = o[i];
+    let dyn = 0;
+    for (let k = 1, kk = K[i]; k <= kk; k++) dyn += c[oo + 2 * k - 1] * t[2 * k - 2] + c[oo + 2 * k] * t[2 * k - 1];
+    out[i] = base[i] + (leg[i] ? sc[i] * legGain : sc[i]) * dyn;
+  }
+  return out;
+}
 
+const PLAN_OUT = new Float64Array(32);
 export function pose(P, phase) {
-  const p = phase - Math.floor(phase);
-  const g = (d) => ev(P, d, p);
+  const p = phase - Math.floor(phase), pl = P.plan ??= planFor(P), A = evalPlan(pl, p, PLAN_OUT, P.legGain);
   const out = {
     phase: p,
-    pelvis: [g("pelvis_tilt"), g("pelvis_obl"), g("pelvis_rot")],     // anterior tilt, left up, left forward
-    spine: [g("spine_flex"), g("spine_lat"), g("spine_rot")],
-    neck: [g("neck_flex") - P.neck0, g("neck_lat"), g("neck_rot")],
-    trans: P.root ? P.root.map((cs) => series(cs, p)) : [g("trans_fwd") * P.L / 100, g("trans_lat") * P.L / 100, g("trans_up") * P.L / 100],
+    pelvis: [A[0], A[1], A[2]],                                       // anterior tilt, left up, left forward
+    spine: [A[3], A[4], A[5]],
+    neck: [A[6] - P.neck0, A[7], A[8]],
+    trans: P.root ? P.root.map((cs) => series(cs, p)) : [A[9] * P.L / 100, A[10] * P.L / 100, A[11] * P.L / 100],
   };
-  for (const [s, ps] of [["L", p], ["R", (p + 0.5) % 1]]) {
+  for (const [s, at] of [["L", 12], ["R", 22]]) {
     const o = {};
-    for (const d of LIMB) o[d] = ev(P, d, ps, s);
+    for (let i = 0; i < 10; i++) o[LIMB[i]] = A[at + i];
     out[s] = o;
   }
   return out;
@@ -223,18 +250,22 @@ export function fk(P, a, rootX = 0, opt = {}) {
   // the data's pelvis tilt includes the ASIS-PSIS slope (~10 deg anterior when standing upright); remove it for the frame
   const Rpel = mm(Rp, Ry(-P.c[P.B.layout.pelvis_tilt[0]] * d));
   const J = { root };
-  const Rthx = mm(Rp, mm(mm(Rz(a.spine[2] * d), Rx(-a.spine[1] * d)), Ry(a.spine[0] * d)));
-  const Rhead = mm(Rthx, mm(mm(Rz(a.neck[2] * d), Rx(-a.neck[1] * d)), Ry(a.neck[0] * d)));
-  // the thorax pitch above includes the pelvis's ASIS offset: the data's thorax angle is pelvis tilt + spine flexion
-  // two spine segments: the lumbar carries half the data's spine motion, the thorax the rest plus any stoop (kyphosis)
-  const lf = 0.5 * (a.spine[0] - (P.stoop || 0));
-  const Rlum = mm(Rp, mm(mm(Rz(0.5 * a.spine[2] * d), Rx(-0.5 * a.spine[1] * d)), Ry(lf * d)));
-  J.waist = add(root, mv(Rlum, [0, 0, 0.42 * b.trunk]));
-  J.chest = add(J.waist, mv(Rthx, [0, 0, 0.58 * b.trunk]));
-  J.neck = add(J.chest, mv(Rhead, [0, 0, b.neck]));
-  J.headC = add(J.neck, mv(Rhead, [0.01 * b.H, 0, b.head * 0.45]));
-  J.rot = { thx: Rthx, head: Rhead, pel: Rpel };
-  for (const s of ["L", "R"]) {
+  const legL = opt.legL;           // opt.legL: the root and the left leg only (what calibrate() measures), the same numbers for those
+  let Rthx;
+  if (!legL) {
+    Rthx = mm(Rp, mm(mm(Rz(a.spine[2] * d), Rx(-a.spine[1] * d)), Ry(a.spine[0] * d)));
+    const Rhead = mm(Rthx, mm(mm(Rz(a.neck[2] * d), Rx(-a.neck[1] * d)), Ry(a.neck[0] * d)));
+    // the thorax pitch above includes the pelvis's ASIS offset: the data's thorax angle is pelvis tilt + spine flexion
+    // two spine segments: the lumbar carries half the data's spine motion, the thorax the rest plus any stoop (kyphosis)
+    const lf = 0.5 * (a.spine[0] - (P.stoop || 0));
+    const Rlum = mm(Rp, mm(mm(Rz(0.5 * a.spine[2] * d), Rx(-0.5 * a.spine[1] * d)), Ry(lf * d)));
+    J.waist = add(root, mv(Rlum, [0, 0, 0.42 * b.trunk]));
+    J.chest = add(J.waist, mv(Rthx, [0, 0, 0.58 * b.trunk]));
+    J.neck = add(J.chest, mv(Rhead, [0, 0, b.neck]));
+    J.headC = add(J.neck, mv(Rhead, [0.01 * b.H, 0, b.head * 0.45]));
+    J.rot = { thx: Rthx, head: Rhead, pel: Rpel };
+  }
+  for (const s of legL ? ["L"] : ["L", "R"]) {
     const m = s === "L" ? 1 : -1, q = a[s];
     const hip = add(root, mv(Rpel, [0, m * b.hipW / 2, 0]));
     let Rth = mm(Rp, mm(mm(Ry(-q.hip_flex * d), Rx(-m * q.hip_add * d)), Rz(0)));
@@ -253,6 +284,7 @@ export function fk(P, a, rootX = 0, opt = {}) {
     let toe = add(heel, fdir, b.foot);
     const tl = 0.28 * b.foot, tz = toe[2] - ball[2];
     if (tz < 0) { const hx = fdir[0], hy = fdir[1], hn = Math.hypot(hx, hy) || 1; toe = [ball[0] + hx / hn * tl, ball[1] + hy / hn * tl, ball[2]]; }
+    if (legL) { J[s] = { hip, knee, ankle, heel, ball, toe }; continue; }
     const sho = add(J.chest, mv(Rthx, [0, m * b.shoulderW / 2, -0.02 * b.H]));
     const Rua = mm(Rthx, mm(Ry(-q.shoulder_flex * d), Rx(m * q.shoulder_abd * d)));
     const elb = add(sho, mv(Rua, [0, 0, -b.upperArm]));
@@ -270,7 +302,7 @@ export function fk(P, a, rootX = 0, opt = {}) {
 // Over stance (duty * T) the root advances duty * stride (+ the fitted surge). The leg's sagittal swing is scaled
 // (legGain) until the kinematic excursion equals that, so speed = stride x cadence holds for these limbs.
 function contactX(P, ph, s) {
-  const a = pose(P, ph), J = fk(P, a, 0);
+  const a = pose(P, ph), J = fk(P, a, 0, { legL: true });
   return { heel: J[s].heel, ball: J[s].ball, root: J.root };
 }
 function excursion(P) {
@@ -291,7 +323,7 @@ function calibrate(P) {
   P.h0 = P.body.leg;
   let sum = 0, n = 0;
   for (let i = 0; i <= 20; i++) {
-    const ph = P.duty * i / 20, J = fk(P, pose(P, ph), 0);
+    const ph = P.duty * i / 20, J = fk(P, pose(P, ph), 0, { legL: true });
     sum += Math.min(J.L.heel[2], J.L.ball[2]); n++;
   }
   P.h0 -= sum / n;
