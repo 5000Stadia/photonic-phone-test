@@ -38,6 +38,8 @@ function skinColour(melanin) {
   return "#" + [0, 1, 2].map((c) => hex2(a[c] + (b[c] - a[c]) * t)).join("");
 }
 
+export { SKIN_RAMP, skinColour };
+
 /** The traits as a MakeHuman recipe.
  *  sex     the gender slider, 0 female .. 1 male: the person's sex, shifted by body.MF (the frame owns the shoulders and hips; masculine is
  *          negative), softly limited so no one is the corner caricature (a typical man 0.85, a woman 0.15; a feminine-framed man 0.6)

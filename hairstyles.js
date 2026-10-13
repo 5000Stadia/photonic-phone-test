@@ -28,6 +28,8 @@ const PEOPLE = [
     hair: { style: "long", parting: "centre", fringe: "none", eumelanin: 0.6, pheomelanin: 0.15 } },
 ];
 const COLOURS = [["Blond", "#b8915c", 0], ["Brown", "#5a3d26", 0], ["Black", "#1c1714", 0], ["Red", "#a14a22", 0], ["Grey", "#74695e", 0.9]];
+const V2 = new Set(["bob", "updo", "braid"]);   // styles with an improved (v2) version; the rest show only version 1 until they are rebuilt
+let after = Q.get("hair") !== "before";            // the toggle: improved hair, or today's version of the same style
 const STRAND = {};   // per style: "u" if the strands run along U in the atlas (none so far)
 
 const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: true });
@@ -47,6 +49,7 @@ const cam = new THREE.PerspectiveCamera(28, 1, 0.05, 50);
 
 // ---- build everyone
 const styles = await loadStyles(THREE, PEOPLE.filter((p) => p.id !== "today").map((p) => p.id));
+const styles2 = await loadStyles(THREE, PEOPLE.filter((p) => V2.has(p.id)).map((p) => p.id), 2);
 const people = [], t0 = performance.now(), hairOf = [];
 for (const p of PEOPLE) {
   const r = { age: p.age, sex: p.sex, height: p.height, build: p.build, skin: p.skin, seed: p.seed, beard: "none" };
@@ -60,9 +63,16 @@ for (const p of PEOPLE) {
     person = buildPerson(THREE, { ...r, hairForm: p.form, hairColor: p.hairColor, grey: p.grey }, "near");
     for (const o of [...person.children]) if (o.name === "hair") { person.remove(o); o.geometry.dispose(); }   // appearance's old hair: ours replaces it
     const lk = person.userData.look;
-    const hair = wear(THREE, renderer, s, person, r, { tip: lk.hair.color, grey: lk.hair.grey, strand: STRAND[p.id] || "v", tune: { debug: Q.get("dbg") || "", ...Object.fromEntries(["rough", "aniso", "spec", "lobe2", "toneK", "detailK"].filter((k) => Q.get(k)).map((k) => [k, +Q.get(k)])) } });
+    const topt = { tip: lk.hair.color, grey: lk.hair.grey, strand: STRAND[p.id] || "v" };
+    const dials = Object.fromEntries(["rough", "aniso", "spec", "lobe2", "toneK", "detailK", "spec1", "spec2", "exp1", "exp2", "shift1", "shift2", "clumpShift", "wrap", "trans", "hairline", "rootDark", "tipLight", "strays"].filter((k) => Q.get(k)).map((k) => [k, +Q.get(k)]));
+    const h1 = wear(THREE, renderer, s, person, r, { ...topt, tune: { debug: Q.get("dbg") || "", ...dials } });
+    const h2 = V2.has(p.id) ? wear(THREE, renderer, styles2[p.id], person, r, { ...topt, tune: dials }) : null;
+    // one handle for both versions: colour and dials go to both, the page shows one
+    const hair = { stats: (h2 || h1).stats, stats1: h1.stats, h1, h2, geometry: (h2 || h1).geometry, set: (a, b) => { h1.set(a, b); if (h2) h2.set(a, b); }, tune: (o) => { h1.tune(o); if (h2) h2.tune(o); },
+      show: (v2) => { h1.group.visible = !(v2 && h2); if (h2) h2.group.visible = !!v2; } };
+    hair.show(after);
     hairOf[people.length] = hair;
-    entry = { name: m.name, sub: `${m.licence} · ${m.author} · ${m.triangles.toLocaleString()} tris`, stats: hair.stats, hair, r };
+    entry = { name: m.name, sub: `${m.licence} · ${m.author} · ${m.triangles.toLocaleString()} tris`, stats: hair.stats, hair, r, v2: !!h2 };
   }
   if (Q.get("plain")) person.children[0].material = new THREE.MeshStandardNodeMaterial({ color: p.skin, roughness: 0.6 });   // for shooting on a software GL: the procedural skin takes minutes to link there
   if (!person.getObjectByName("base-layer")) throw new Error("no base layer: refusing to show an unclothed person");
@@ -72,11 +82,11 @@ for (const p of PEOPLE) {
 const buildMs = performance.now() - t0;
 
 // ---- view state
-let first = Math.min(PEOPLE.length - 1, Math.max(0, +(Q.get("i") || 0))), w0 = first, yaw = 0, turning = false, frame = Q.get("frame") === "head" ? "head" : "bust";
+let first = Math.min(PEOPLE.length - 1, Math.max(0, +(Q.get("i") || 0))), w0 = first, yaw = 0, turning = false, frame = ["head", "close", "far"].includes(Q.get("frame")) ? Q.get("frame") : "bust";
 const YAW = { front: 0, three: 0.75, side: Math.PI / 2, back: Math.PI };
 let viewName = Q.get("view") in YAW || Q.get("view") === "turn" ? Q.get("view") : "turn";
 const W = () => cv.clientWidth, H = () => cv.clientHeight;
-const span = () => frame === "head" ? 0.5 : 0.85;                       // metres of height in view at the person
+const span = () => frame === "close" ? 0.3 : frame === "head" ? 0.5 : frame === "far" ? 1.5 : 0.85;                       // metres of height in view at the person
 const countFor = () => Q.get("count") ? Math.max(1, Math.min(PEOPLE.length, +Q.get("count"))) : Math.max(1, Math.min(4, Math.floor((W() / H()) * span() / 0.8)));
 let dirty = true;
 
@@ -91,7 +101,7 @@ function layout() {
     if (vis && Math.abs(x) < spanH / 2) { hy += e.p.height; k++; }
   });
   hy = k ? hy / k : 1.66;
-  const lookY = hy - (frame === "head" ? 0.15 : 0.32);
+  const lookY = hy - (frame === "close" ? 0.1 : frame === "head" ? 0.15 : frame === "far" ? 0.5 : 0.32);
   cam.position.set(0, lookY + 0.04, D); cam.lookAt(0, lookY, 0);
   const lk = people.map((e) => (e.person.visible && Math.abs(e.person.position.x) <= spanH / 2 ? 1 : 0)).join("") + frame + n;
   if (lk !== labelKey) { labelKey = lk; labels(spanH); }
@@ -118,6 +128,10 @@ function setView(name) { viewName = name; turning = name === "turn"; if (!turnin
 for (const b of document.querySelectorAll("#views button")) b.onclick = () => setView(b.dataset.v);
 function setFrame(f) { frame = f; for (const b of document.querySelectorAll("#frames button")) b.setAttribute("aria-pressed", String(b.dataset.f === f)); dirty = true; }
 for (const b of document.querySelectorAll("#frames button")) b.onclick = () => setFrame(b.dataset.f);
+
+function setVersion(v) { after = v === "after"; for (const e of people) if (e.hair) e.hair.show(after); for (const b of document.querySelectorAll("#version button")) b.setAttribute("aria-pressed", String(b.dataset.h === v)); dirty = true; }
+for (const b of document.querySelectorAll("#version button")) b.onclick = () => setVersion(b.dataset.h);
+setVersion(after ? "after" : "before");
 
 // hair colour: the style's shell, and the person's brows with it (the same row of appearance's table the person was built into)
 function recolour(e, hex, grey) {
@@ -159,8 +173,9 @@ function loop(now) {
 function check() {
   return people.filter((e) => e.hair).map((e) => ({ id: e.p.id, tris: e.stats.triangles, ratio: e.stats.ratio, fitMs: e.stats.fitMs, ...scalpCheck(e.person, e.hair, e.p.height) }));
 }
-window.setShot = async ({ i = first, yaw: deg = 0, frame: f = frame, colour = null, count = null } = {}) => {
+window.setShot = async ({ i = first, yaw: deg = 0, frame: f = frame, colour = null, count = null, hair = null } = {}) => {
   if (count) Q.set("count", String(count));
+  if (hair) setVersion(hair);
   renderer.setAnimationLoop(null); turning = false; viewName = "fixed"; yaw = deg * Math.PI / 180; first = w0 = i;
   for (const b of document.querySelectorAll("#views button")) b.setAttribute("aria-pressed", "false");
   if (colour) colourAll(colour);

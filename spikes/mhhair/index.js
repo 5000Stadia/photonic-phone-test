@@ -8,6 +8,8 @@
 // axis is a pair of body vertices' distance on this person over the same distance on the neutral base (checked on the base: it lands on the scalp).
 import { bake, weights } from "../makehuman/index.js";
 import { hairMaterials } from "./material.js";
+import { hairMaterials2 } from "./material2.js";
+import { flowTangents, strays as makeStrays } from "./flow2.js";
 
 const KEEP_OUT = 0.0025;
 const DATA = new URL("./data/", import.meta.url);
@@ -21,20 +23,22 @@ async function loadHelper() {
   return (helper = { ...meta, base, deltas });
 }
 
-export async function loadStyles(THREE, ids) {
+// version 1: the shells as first packed (data/<id>.*, material.js). Version 2: clump-aware atlas, hairline fade, flyaways, our own shading (data/v2/<id>.*, material2.js).
+export async function loadStyles(THREE, ids, version = 1) {
   await loadHelper();
   const loader = new THREE.TextureLoader();
   const out = {};
   await Promise.all(ids.map(async (id) => {
-    const meta = await (await fetch(new URL(`${id}.json`, DATA))).json(), buf = await gunzip(`${id}.bin.gz`);
+    const dir = version === 2 ? "v2/" : "";
+    const meta = await (await fetch(new URL(`${dir}${id}.json`, DATA))).json(), buf = await gunzip(`${dir}${id}.bin.gz`);
     const R = meta.rows, V = meta.vertices, Tn = meta.triangles;
     let o = 0;
     const take = (Cls, n) => { const a = new Cls(buf.slice(o, o + n * Cls.BYTES_PER_ELEMENT)); o += n * Cls.BYTES_PER_ELEMENT; return a; };
     const idx = take(Uint16Array, R * 3), w = take(Float32Array, R * 3), off = take(Float32Array, R * 3);
-    const vmap = take(Uint16Array, V), uv = take(Float32Array, V * 2), rt = take(Uint8Array, V), tris = take(Uint16Array, Tn * 3);
-    const atlas = await loader.loadAsync(new URL(`${id}.png`, DATA).href);
+    const vmap = take(Uint16Array, V), uv = take(Float32Array, V * 2), rt = take(Uint8Array, V), hl = version === 2 ? take(Uint8Array, V) : null, fl = version === 2 ? take(Uint8Array, V) : null, tris = take(Uint16Array, Tn * 3);
+    const atlas = await loader.loadAsync(new URL(`${dir}${id}.png`, DATA).href);
     atlas.colorSpace = THREE.NoColorSpace; atlas.wrapS = atlas.wrapT = THREE.RepeatWrapping; atlas.anisotropy = 4;
-    out[id] = { id, meta, idx, w, off, vmap, uv, rt, tris, atlas };
+    out[id] = { id, meta, idx, w, off, vmap, uv, rt, hl, fl, tris, atlas, version };
   }));
   return out;
 }
@@ -128,19 +132,36 @@ export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey 
     if (!(l > 1e-6)) { x = 0; y = -1; z = 0; const d2 = ny * -1; x -= nx * d2; y -= ny * d2; z -= nz * d2; l = Math.hypot(x, y, z) || 1; }   // no usable UV direction: down the hair
     tg4[4 * i] = x / l; tg4[4 * i + 1] = y / l; tg4[4 * i + 2] = z / l; tg4[4 * i + 3] = 1;
   }
+  const v2 = style.version === 2;
+  if (v2) tg4.set(flowTangents(pos, nor, style.tris, Float32Array.from(style.fl, (x) => x / 255), m.vertices));   // the strand direction: the gradient of the island's own flow coordinate
+  let P = pos, Nn = nor, Tg = tg4, UVs = style.uv, RT = rtf, IDX = style.tris, HL = null, SP = null, strayN = 0;
+  if (v2) {
+    HL = new Float32Array(m.vertices); for (let i = 0; i < m.vertices; i++) HL[i] = style.hl[i] / 255;
+    SP = new Float32Array(m.vertices * 3);
+    const nStray = tune.strays != null ? tune.strays : 28, sz = r.height / 1.7;
+    const st = nStray > 0 ? makeStrays(pos, nor, tg4, style.tris, rtf, { seed: (r.seed || 1) + 17, count: nStray, size: sz, minRt: m.strayMinRt != null ? m.strayMinRt : 0.35 }) : null;
+    if (st) {
+      const nv = m.vertices, ns = st.pos.length / 3; strayN = nStray;
+      const cat = (A, B, Cls) => { const o = new Cls(A.length + B.length); o.set(A); o.set(B, A.length); return o; };
+      P = cat(pos, st.pos, Float32Array); Nn = cat(nor, st.nor, Float32Array); Tg = cat(tg4, st.tan, Float32Array); UVs = cat(style.uv, st.uv, Float32Array);
+      RT = cat(rtf, st.rt, Float32Array); HL = cat(HL, new Float32Array(ns).fill(1), Float32Array); SP = cat(SP, st.sp, Float32Array);
+      IDX = cat(style.tris, st.index.map((x) => x + nv), Uint16Array);
+    }
+  }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("tangent", new THREE.BufferAttribute(tg4, 4));
-  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3)); geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
-  geo.setAttribute("uv", new THREE.BufferAttribute(style.uv, 2)); geo.setAttribute("rt", new THREE.BufferAttribute(rtf, 1));
-  geo.setIndex(new THREE.BufferAttribute(style.tris, 1));
-  const mats = hairMaterials(THREE, renderer, style.atlas, { strand, ...tune });
+  geo.setAttribute("tangent", new THREE.BufferAttribute(Tg, 4));
+  geo.setAttribute("position", new THREE.BufferAttribute(P, 3)); geo.setAttribute("normal", new THREE.BufferAttribute(Nn, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(UVs, 2)); geo.setAttribute("rt", new THREE.BufferAttribute(RT, 1));
+  if (v2) { geo.setAttribute("hl", new THREE.BufferAttribute(HL, 1)); geo.setAttribute("sp", new THREE.BufferAttribute(SP, 3)); }
+  geo.setIndex(new THREE.BufferAttribute(IDX, 1));
+  const mats = v2 ? hairMaterials2(THREE, renderer, style.atlas, tune) : hairMaterials(THREE, renderer, style.atlas, { strand, ...tune });
   mats.set(tip, grey);
   const core = new THREE.Mesh(geo, mats.core), rim = new THREE.Mesh(geo, mats.rim);
   core.renderOrder = 0; rim.renderOrder = 1;
   const group = new THREE.Group(); group.name = "hair-" + style.id; group.add(core, rim);
   for (const o of group.children) { o.frustumCulled = false; o.castShadow = o.receiveShadow = false; }
   person.add(group);
-  const stats = { id: style.id, triangles: m.triangles, vertices: m.vertices, draws: 2, ratio: ratio.map((x) => +x.toFixed(3)), lifted, fitMs: +(performance.now() - t0).toFixed(1) };
+  const stats = { id: style.id, triangles: m.triangles + (v2 ? IDX.length / 3 - m.triangles : 0), strayTriangles: v2 ? IDX.length / 3 - m.triangles : 0, vertices: m.vertices, draws: 2, ratio: ratio.map((x) => +x.toFixed(3)), lifted, fitMs: +(performance.now() - t0).toFixed(1) };
   return { group, stats, set: mats.set, tune: mats.tune, geometry: geo };
 }
 

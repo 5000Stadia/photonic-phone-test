@@ -9,12 +9,12 @@ import { makeDraw } from "./draw.js";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs } = {}) {
-  const pop = makePopulation({ ctx, basis, thresholds, planBudget });
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits } = {}) {
+  const pop = makePopulation({ ctx, basis, thresholds, planBudget, ...(outfits !== undefined ? { outfits } : {}) });
   const draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
-  let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0 };
+  let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
 
   function handle(rec) {
     if (!rec) return null;
@@ -34,6 +34,10 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
         return true;
       },
       perceives: () => ({ seen: [], heard: [] }),                       // M4
+      // what she wears is state, read every frame and never rebaked: `wear("bodice" | "skirt", false)` takes a garment off (the draw switches to the class without it, the base layer
+      // stays), `true` puts it on. Returns false for someone who wears no outfit or no such garment.
+      wear(garment, on = true) { const d = rec.dressing; if (!d || !(garment in d.wear)) return false; d.wear[garment] = !!on; return true; },
+      worn: () => { const d = rec.dressing; return d ? { ...d.wear } : null; },
       bounds: () => ({ half: rec.half, height: rec.height, reach: 0.42 * rec.height }),
       state: () => pop.state(id),
     };

@@ -40,11 +40,14 @@ function angles(w, p) {
     [a.pelvis, a.spine, a.neck].forEach((v, i) => { A[3 * i] = v[0]; A[3 * i + 1] = v[1]; A[3 * i + 2] = v[2]; });
     A[9] = a.trans[0]; A[10] = a.trans[1]; A[11] = a.trans[2];
     ["L", "R"].forEach((s, k) => WALK_LIMB.forEach((d, i) => { A[12 + 7 * k + i] = a[s][d]; }));
-    return;
+  } else {
+    evalPlan(w.plan, p, A, P.legGain);
+    A[6] -= P.neck0;
+    A[9] = A[9] * P.L / 100; A[10] = A[10] * P.L / 100; A[11] = A[11] * P.L / 100;
   }
-  evalPlan(w.plan, p, A, P.legGain);
-  A[6] -= P.neck0;
-  A[9] = A[9] * P.L / 100; A[10] = A[10] * P.L / 100; A[11] = A[11] * P.L / 100;
+  // an outfit's arm rest (R5, outfits declare it): degrees added to both shoulders' flexion (forward) and abduction (out from the side), so a wearer's arms hang
+  // over a skirt's swell instead of inside it. Others have none (w.arms is null) and walk as the data has them.
+  if (w.arms) for (let s = 0; s < 2; s++) { A[16 + 7 * s] += w.arms.flex; A[17 + 7 * s] += w.arms.abd; }
 }
 
 // scratch rotations: the pelvis column, the thorax, the head, the lumbar, the trunk's standing pitch, temporaries; then per side the thigh, shin,
@@ -93,6 +96,8 @@ function poseCore(w, phase) {
     Pm[q + 1] = Pm[pa * 3 + 1] + (W[M + 3] * d[0] + W[M + 4] * d[1] + W[M + 5] * d[2]);
     Pm[q + 2] = Pm[pa * 3 + 2] + (W[M + 6] * d[0] + W[M + 7] * d[1] + W[M + 8] * d[2]);
   }
+  // an outfit's keep-out (R5, keepout.js): the arms are moved out of what the person wears, baked into the frames this pose is written to, so the crowd pays nothing a frame
+  if (w.keepout) w.keepout.apply(w.bones, { phase: phase - Math.floor(phase), sway: 1 });
 }
 
 // The lowest a foot point goes over the cycle (the foot and toe bones' joints below their rest height), sampled at the DROP_FRAMES phases the baked
@@ -108,8 +113,10 @@ function lowestFoot(w, drop) {
   return low;
 }
 
-// One person's walker for a body with rest joints J (the rig's, in body.js's layout). `who`: { age, sex (+1/-1), seed, height? }; the
-// height is the body's own when given (R5: MakeHuman's children carry their hips lower than 0.53 of it), else the hips over 0.53.
+// One person's walker for a body with rest joints J (the rig's, in body.js's layout). `who`: { age, sex (+1/-1), seed, height?, arms? }; the
+// height is the body's own when given (R5: MakeHuman's children carry their hips lower than 0.53 of it), else the hips over 0.53. `arms`: { abd, flex }
+// degrees added to both shoulders (an outfit's arm rest, garments/outfit.js); left out, the arms walk as the data has them. `keepout`: { apply(bones, ctx) }, run on every pose
+// (keepout.js), so a wearer's arms stay out of her clothes; left out, nothing is done.
 export function makeWalker(J, who, basis) {
   const hipY = J[0][1], H = who.height ?? J[0][1] / 0.53;
   // root "fitted": the data's own pelvis path, 2 ms a person, against 16 ms for the root from the feet (65 against 42 mm
@@ -119,10 +126,11 @@ export function makeWalker(J, who, basis) {
   const L = hipY, v = Math.sqrt(P.fr * 9.81 * L), stride = P.lam * L, f = v / stride;
   const scaleTrans = L / P.L;
   const plan = P.root ? null : planFor(P, CENTRE, WALK_LIMB);
-  const w = { P, J, v, f, hipY, scaleTrans, _drop: null, plan, Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3),
+  const w = { P, J, v, f, hipY, scaleTrans, _drop: null, plan, arms: who.arms ?? null, keepout: who.keepout ?? null, Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3),
     Dj: BONES.map(([, pa], b) => (pa < 0 ? null : [J[b][0] - J[pa][0], J[b][1] - J[pa][1], J[b][2] - J[pa][2]])), src: null };
   // which scratch rotation each bone takes; the head bone shares the neck's, the hand the forearm's, the toe the foot's
   const sideOf = (n) => Rside[n.endsWith("L") ? 0 : 1];
+  w.bones = { W: w.Wm, P: w.Pm };
   w.src = BONES.map(([n]) => n === "hips" ? Rpel : n === "spine" ? Rsp : n === "chest" ? Rch : n === "neck" || n === "head" ? Rnk : n.startsWith("clav") ? Rch
     : n.startsWith("upperarm") ? sideOf(n).ua : n.startsWith("forearm") || n.startsWith("hand") ? sideOf(n).fa : n.startsWith("thigh") ? sideOf(n).th
     : n.startsWith("shin") ? sideOf(n).sh : sideOf(n).fo);

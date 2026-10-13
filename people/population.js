@@ -9,6 +9,7 @@ import { resolve } from "../traits/resolve.js";
 import { uniform, seedOf } from "../traits/stream.js";
 import { paramsFor, build, buildNear, farBody } from "./bodies.js";
 import { makeWalker } from "./walk.js";
+import { outfitFor, dressingFor } from "./outfits.js";
 
 export const TIERS = ["near", "mid", "far"];
 const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of middle rank; R9's phone figures set these
@@ -23,8 +24,9 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.basis       the fitted gait basis (spikes/gait/data/gait-basis.json, loaded)
  * @param opts.thresholds  { near, mid } in metres at middle rank
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
+ * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true } = {}) {
+export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, outfits = outfitFor } = {}) {
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown
@@ -65,18 +67,22 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     };
     rec.half = Math.max(0.18, 0.13 * rec.height);
     // Built on first need, so people never seen or walked cost nothing beyond their resolution.
-    let body = null, params = null, far = null, walker;
+    let body = null, params = null, far = null, walker, dressing;
     Object.defineProperties(rec, {
       bodyParams: { get: () => (params ??= paramsFor(res.values, res.derived)) },
       body: { get: () => (body ??= build(rec.bodyParams)) },
       buildNear: { value: () => buildNear(rec.bodyParams) },        // the near tier's full body, built when drawn near, not kept
       far: { get: () => (far ??= farBody(rec.bodyParams)) },       // the far tier's person and the walker's joints, from the table: no body is built for them
+      // what the person wears (outfits.js; a placeholder rule until M3's sampler): null for the base layer only. A wearer's skirt widens the radius they ask of the floor, and their
+      // walker keeps the arms out of the skirt (keepout.js), baked into the walk.
+      dressing: { get: () => { if (dressing === undefined) { const o = outfits ? outfits(id, res.values) : null; dressing = o ? dressingFor(id, o, rec.bodyParams, rec.far.J) : null; if (dressing) rec.half = Math.max(rec.half, dressing.footprint); } return dressing; } },
       walker: { get: () => (walker !== undefined ? walker : (walker = basis ? makeWalker(rec.far.J, {
-        age: res.values.age, sex: res.values.sex === "male" ? 1 : res.values.sex === "female" ? -1 : 0, seed: seedOf(`${seed}:${id}:walk`), height: rec.height }, basis) : null)) },
+        age: res.values.age, sex: res.values.sex === "male" ? 1 : res.values.sex === "female" ? -1 : 0, seed: seedOf(`${seed}:${id}:walk`), height: rec.height, keepout: rec.dressing?.keepout }, basis) : null)) },
       speed: { get: () => rec.walker ? rec.walker.v : 1.3 },
       rate: { get: () => rec.walker ? rec.walker.f : 0.9 },
       built: { get: () => body !== null },
     });
+    void rec.dressing;           // her skirt's radius is part of her footprint from the start (the stepping aside, the claims)
     people.set(id, rec);
     roomSet(rec.room).add(id);
     hold(rec);
