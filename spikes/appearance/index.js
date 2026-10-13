@@ -50,7 +50,7 @@ export function setTier(THREE, g, tier) {
   g.children[0].material = skinMaterial(THREE, tier);
   g.traverse(o => { if (o.name === "eye") o.material = eyeMaterial(THREE, tier); });
   hairTier(THREE, g, tier);
-  if (base) base.visible = true;
+  if (base) { base.visible = true; base.renderOrder = -1; }   // occluders first, so early depth skips the skin under clothes (R9 phone run)
   g.userData.tier = tier;
 }
 function count(g) {

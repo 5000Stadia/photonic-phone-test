@@ -101,7 +101,7 @@ export function skinMaterial(THREE, tier = "near") {
   if (made.has(key)) return made.get(key);
   const T = THREE.TSL;
   const { Fn, attribute, vec3, float, abs, clamp, exp, sqrt, pow, sin, mix, smoothstep, length,
-    mx_fractal_noise_vec3, mx_noise_vec3, mx_noise_float, mx_worley_noise_float, mx_cell_noise_float, floor } = T;
+    mx_fractal_noise_vec3, mx_noise_vec3, mx_noise_float, mx_worley_noise_float, mx_cell_noise_float, floor, If } = T;
   const near = tier === "near", far = tier === "far";
   const SkinLighting = lightingModel(THREE);
   class SkinMaterial extends THREE.MeshStandardNodeMaterial {
@@ -123,20 +123,28 @@ export function skinMaterial(THREE, tier = "near") {
   const g2 = (dx, dy, rx, ry) => exp(dx.div(rx).pow(2).add(dy.div(ry).pow(2)).negate());
   const band = (v, lo, hi, s) => smoothstep(lo - s, lo + s, v).mul(smoothstep(hi + s, hi - s, v));
 
-  // ---- noise, by tier: near 3 octaves (3 channels); mid one octave; far none ----
+  // ---- noise, by tier: near 3 octaves (3 channels) on the head, one elsewhere; mid one octave; far none ----
+  // The near tier's detail is gated by region (If): its pixels cost most on a phone (Kabe's iPhone run, 2026-10-12: the
+  // near person 50-65 ms, her skin's paint half of it), and each detail only shows where it lives, so a region that
+  // can't show it skips it whole. Regions are coherent on screen, so the branch costs little.
   const q = p.add(u.shift);
-  const nf = far ? vec3(0) : near ? mx_fractal_noise_vec3(q.mul(2.2), 3, 2.0, 0.5) : mx_noise_vec3(q.mul(2.2));
+  const head = y.greaterThan(5.8);
   const front = smoothstep(0.85, 1.2, z);
 
   const { hl, az } = hairlineNode(T, p, u.recede);
   const ear = earNode(T, p);
-  const scalpN = near ? mx_noise_float(q.mul(vec3(9, 40, 9))) : float(0);
   // the scalp paint: full at the hairline's inner edge, fading out through fine strands (near) over ~4 mm
-  const strands = near ? strandsNode(T, p, u.shift) : float(0.5);
-  let scalp = smoothstep(hl.sub(0.03), hl.add(0.03), y.add(strands.sub(0.5).mul(0.05))).mul(float(1).sub(ear));
-  scalp = scalp.mul(mix(float(1), smoothstep(7.95, 7.75, y).mul(smoothstep(0.9, 1.4, az)), u.bald));
+  const ScalpFn = Fn(() => {
+    const strands = float(0.5).toVar();
+    if (near) If(abs(y.sub(hl)).lessThan(0.06), () => { strands.assign(strandsNode(T, p, u.shift)); });
+    return smoothstep(hl.sub(0.03), hl.add(0.03), y.add(strands.sub(0.5).mul(0.05))).mul(float(1).sub(ear))
+      .mul(mix(float(1), smoothstep(7.95, 7.75, y).mul(smoothstep(0.9, 1.4, az)), u.bald));
+  });
+  const scalp = ScalpFn().toVar("scalp");
 
   const ColorFn = Fn(() => {
+    const nf = (far ? vec3(0) : mx_noise_vec3(q.mul(2.2))).toVar();
+    if (near) If(head, () => { nf.assign(mx_fractal_noise_vec3(q.mul(2.2), 3, 2.0, 0.5)); });
     const base = vec3(u.skin).toVar();
     if (!far) {
       base.mulAssign(float(1).add(nf.x.mul(0.06).mul(u.mottle)));
@@ -153,16 +161,20 @@ export function skinMaterial(THREE, tier = "near") {
     const lid = g2(ax.sub(0.32), y.sub(7.39), 0.14, 0.055).mul(front);
     base.mulAssign(mix(vec3(1), vec3(0.9, 0.84, 0.84), lid));
 
-    if (near) {   // freckles and age spots: near only
-      const w = mx_worley_noise_float(q.mul(26));
-      const on = mx_cell_noise_float(floor(q.mul(26)));
+    if (near) {   // freckles and age spots: near only, and only on people who have them, where they fall
       const frZone = g2(ax.sub(0.25), y.sub(7.0), 0.4, 0.3).mul(front).add(smoothstep(4.6, 5.2, y).mul(smoothstep(6.0, 5.6, y)).mul(0.5));
-      const freck = smoothstep(0.32, 0.12, w).mul(on.greaterThan(0.45).select(1, 0)).mul(frZone).mul(u.freckles);
-      base.mulAssign(mix(vec3(1), vec3(0.78, 0.62, 0.52), clamp(freck, 0, 1)));
-      const w2 = mx_worley_noise_float(q.mul(11).add(13.7));
-      const on2 = mx_cell_noise_float(floor(q.mul(11).add(13.7)));
-      const spot = smoothstep(0.3, 0.12, w2).mul(on2.greaterThan(0.85).select(1, 0)).mul(u.spots).mul(0.55);
-      base.mulAssign(mix(vec3(1), vec3(0.8, 0.68, 0.58), spot));
+      If(frZone.mul(u.freckles).greaterThan(0.004), () => {
+        const w = mx_worley_noise_float(q.mul(26));
+        const on = mx_cell_noise_float(floor(q.mul(26)));
+        const freck = smoothstep(0.32, 0.12, w).mul(on.greaterThan(0.45).select(1, 0)).mul(frZone).mul(u.freckles);
+        base.mulAssign(mix(vec3(1), vec3(0.78, 0.62, 0.52), clamp(freck, 0, 1)));
+      });
+      If(u.spots.greaterThan(0.004), () => {
+        const w2 = mx_worley_noise_float(q.mul(11).add(13.7));
+        const on2 = mx_cell_noise_float(floor(q.mul(11).add(13.7)));
+        const spot = smoothstep(0.3, 0.12, w2).mul(on2.greaterThan(0.85).select(1, 0)).mul(u.spots).mul(0.55);
+        base.mulAssign(mix(vec3(1), vec3(0.8, 0.68, 0.58), spot));
+      });
     }
 
     // lips
@@ -182,7 +194,8 @@ export function skinMaterial(THREE, tier = "near") {
     const moTop = float(6.80).sub(ax.mul(0.35));
     const moZone = smoothstep(0.34, 0.26, ax).mul(smoothstep(moTop.add(0.015), moTop.sub(0.015), y))
       .mul(smoothstep(top.add(L.mouth[1]).sub(0.005), top.add(L.mouth[1]).add(0.02), y)).mul(front).mul(float(1).sub(lipM));
-    const hairGrain = near ? mx_noise_float(q.mul(vec3(70, 22, 70))).mul(0.5).add(0.5) : float(0.6);
+    const hairGrain = float(0.6).toVar();
+    if (near) If(head.and(u.beard.greaterThan(0.004)), () => { hairGrain.assign(mx_noise_float(q.mul(vec3(70, 22, 70))).mul(0.5).add(0.5)); });
     const facial = mix(beardZone, moZone, u.moOnly).mul(u.beard).mul(hairGrain.mul(0.45).add(0.6));
     const hairC = hairRootNode(THREE).div(0.62);
     base.mulAssign(mix(vec3(1), vec3(0.78, 0.8, 0.86), beardZone.mul(u.stubble).mul(0.85)));
@@ -194,7 +207,10 @@ export function skinMaterial(THREE, tier = "near") {
     const yc = float(7.47).add(u.bLift).add(u.bArch.mul(sin(pow(t, 1.5).mul(Math.PI)))).sub(t.mul(0.02));
     const th = u.bThick.mul(mix(float(1.15), float(0.4), t));
     const bd = abs(y.sub(yc)).div(th);
-    const strokes = near ? mx_noise_float(vec3(ax.mul(22), y.sub(yc).mul(110).add(ax.mul(mix(float(60), float(10), t))), u.shift)) : float(0);
+    const strokes = float(0).toVar();
+    if (near) If(abs(y.sub(yc)).lessThan(th.mul(0.7)).and(z.greaterThan(0.9)), () => {
+      strokes.assign(mx_noise_float(vec3(ax.mul(22), y.sub(yc).mul(110).add(ax.mul(mix(float(60), float(10), t))), u.shift)));
+    });
     const browM = smoothstep(0.62, 0.38, bd).mul(smoothstep(-0.03, 0.04, bt0)).mul(smoothstep(1.06, 0.88, bt0))
       .mul(smoothstep(0.95, 1.2, z)).mul(strokes.mul(0.35).add(0.75)).mul(u.bDense);
     base.assign(mix(base, vec3(u.brow), clamp(browM, 0, 1)));
@@ -207,8 +223,10 @@ export function skinMaterial(THREE, tier = "near") {
     base.assign(mix(base, vec3(0.03, 0.022, 0.02), clamp(lash, 0, 1).mul(0.95)));
 
     // the scalp: the hair's root colour, as the shells' inner faces have it
-    const root = hairRootNode(THREE).mul(scalpN.mul(0.15).add(1));
-    base.assign(mix(base, root, scalp.mul(u.scalp)));
+    If(scalp.mul(u.scalp).greaterThan(0), () => {
+      const scalpN = near ? mx_noise_float(q.mul(vec3(9, 40, 9))) : float(0);
+      base.assign(mix(base, hairRootNode(THREE).mul(scalpN.mul(0.15).add(1)), scalp.mul(u.scalp)));
+    });
     return base;
   });
 

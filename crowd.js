@@ -42,10 +42,15 @@ const nav = document.getElementById("nav");
 const go = (set) => { const p = { ...P, flags: FLAGS, ...set }; location.hash = [p.method, p.n].concat(p.webgl === "1" ? ["gl"] : [], p.flags).join("-"); location.reload(); };
 // The R9 suite: four variants, each ramped up the steps until the median frame passes 34 ms (under 30 fps).
 const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
-// The last three take the near person apart (Kabe's Safari run, 2026-10-12: the near person cost about 50 ms on the
-// iPhone): hair held still (its motion is CPU), hair hidden (its drawing), and half the pixels (fill).
-const VARIANTS = [["shared walk", []], ["own walks", ["own"]], ["own walks + near person", ["own", "near"]], ["own walks + near person, inside the room", ["own", "near", "room"]],
-  ["near person, hair held still", ["own", "near", "still"]], ["near person, hair hidden", ["own", "near", "bald"]], ["near person, half the pixels", ["own", "near", "dpr1"]]];
+// Second run (after Kabe's first one-run benchmark, 2026-10-12: the near person cost 50-65 ms, her skin's paint and her
+// hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
+// blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
+// one pixel read back after each render, so render() covers the GPU's whole frame).
+const VARIANTS = [["own walks", ["own"]], ["own walks + near person", ["own", "near"]], ["near person, no fringe pass", ["own", "near", "nofringe"]],
+  ["near person, no MSAA", ["own", "near", "noaa"]], ["own walks, no MSAA", ["own", "noaa"]], ["near person, half the pixels", ["own", "near", "dpr1"]],
+  ["own walks, GPU-synced", ["own", "sync"]], ["own walks + near person, GPU-synced", ["own", "near", "sync"]]];
+const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
+const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
 // Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
 // play-through): the ramp on a cool phone, then ten minutes at 300 with everything on, then the same 300 again warm.
 // The log lives in localStorage across the reloads and ends in one report to copy or send.
@@ -55,7 +60,7 @@ const store = {
   save: (b) => { try { localStorage.setItem(BENCH_KEY, JSON.stringify(b)); } catch (_) {} },
   get: () => store.all().rows, set: (rows) => { const b = store.all(); b.rows = rows; store.save(b); },
 };
-const WARM = [1, 2];                                       // the variants measured again at 300 once the phone is warm
+const WARM = [0, 1];                                       // the variants measured again at 300 once the phone is warm
 const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
 const suiteGo = (v, st) => { location.hash = ["c2c", STEPS[st], "gl", ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
 const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
@@ -69,7 +74,7 @@ const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t
   ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
   ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
   [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
-  ["Run every benchmark (about 17 min)", startAll, !!SUITE],
+  ["Run every benchmark (about 8 min)", startAll, !!SUITE],
   ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
 for (const [label, fn, on] of buttons) {
   const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -89,7 +94,7 @@ window.onerror = (m) => fail(m);
 window.addEventListener("unhandledrejection", (e) => fail(e.reason && e.reason.message || String(e.reason)));
 
 const tBuild0 = performance.now();
-const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
+const renderer = new THREE.WebGPURenderer({ antialias: !FLAGS.includes("noaa"), forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
 renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : FLAGS.includes("dpr1") ? 1 : Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = SHADOWS;
 document.body.prepend(renderer.domElement); await renderer.init();
@@ -366,6 +371,13 @@ if (NEAR) {
   const Hm = await import("./spikes/hair/index.js");
   near = Hm.build(THREE, renderer, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42, hair: { style: "long" } }, "near");   // long and loose: the costliest hair
   if (FLAGS.includes("bald")) near.traverse(o => { if (/^hair/.test(o.name)) o.visible = false; });   // the cost check only: never a look
+  // cost checks on her skin (Kabe's one-run benchmark, 2026-10-12: her cost is per pixel of her body, not her hair):
+  // skinmid / skinfar swap the skin's tier, skinflat a plain material; the base layer stays on in every one
+  const skinTier = FLAGS.find(f => /^skin(mid|far)$/.test(f));
+  if (skinTier) near.children[0].material = (await import("./spikes/appearance/skin.js")).skinMaterial(THREE, skinTier.slice(4));
+  if (FLAGS.includes("layerfirst")) near.traverse(o => { if (o.name === "base-layer" || /^hair/.test(o.name)) o.renderOrder = -1; });   // occluders first: early depth rejects the skin under them
+  if (FLAGS.includes("nofringe")) near.traverse(o => { if (o.name === "hair-fringe") o.visible = false; });   // the blended second hair pass
+  if (FLAGS.includes("skinflat")) near.children[0].material = new THREE.MeshStandardNodeMaterial({ color: "#c99a74", roughness: 0.55 });
   near.position.set(0, 0, side / 2 + 0.6 - 2.6); scene.add(near); nearHair = Hm.moveHair; nearMs = performance.now() - t;
 }
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
@@ -382,10 +394,14 @@ const mean_ = a => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), pct = (
 const resolveGpu = () => renderer.resolveTimestampsAsync("render").then(v => { if (v) gpuLast = v; }).catch(() => {});
 const mb = b => (b / 1048576).toFixed(2) + " MB";
 
+// sync: read one pixel back after each render, so render() covers the GPU's whole frame and vsync can't hide it
+// (iOS WebGL 2 has no timer queries; this costs the pipelining, so it reads a little high: for cost checks only)
+const SYNC = FLAGS.includes("sync"), px = new Uint8Array(4);
+const syncGpu = () => { const gl = renderer.backend.gl; if (gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
 function frame() {
   const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), frameMs = now - last; last = now;
   const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near && !FLAGS.includes("still")) nearHair(near, dt); const b = performance.now();
-  renderer.render(scene, camera); const c = performance.now();
+  renderer.render(scene, camera); if (SYNC) syncGpu(); const c = performance.now();
   if (Q.get("gpu") !== "0" && phase !== "gpu") resolveGpu();
   win.frame.push(frameMs); win.upd.push(b - a); win.rnd.push(c - b);
   if (phase === "timed") { all.frame.push(frameMs); all.upd.push(b - a); all.rnd.push(c - b); }
@@ -460,7 +476,7 @@ function r9(now, frameMs, cpuMs, rndMs) {
     b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b);
     if (sf.median <= 34 && st + 1 < STEPS.length) return suiteGo(v, st + 1);
     if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
-    return sustainGo();
+    return LONG ? sustainGo() : finishAll();
   }
   // sustain: ten minutes at 300, a row a minute
   r9frames.push(frameMs);
@@ -518,6 +534,7 @@ function reportText(b) {
   VARIANTS.forEach(([name], v) => {
     const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
     L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
+    if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);
     if (at300) L.push(`    at 300: median ${at300.median}, slowest 5% ${at300.p95} ms · cpu ${at300.cpu} · render() ${at300.render} ms · gpu memory ${at300.mem} MB · built in ${at300.build} ms`);
   });
   if (b.sustain) {
