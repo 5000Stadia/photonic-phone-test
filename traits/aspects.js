@@ -24,9 +24,20 @@ export const ASPECTS = [
   { aspect: "hair", durability: "STATE", holds: "words", note: "as worn: length, texture, colour (dye and grey included)" },
   { aspect: "beard", durability: "STATE", holds: "words" },
   { aspect: "marks", durability: "STATE", holds: "words", note: "scars, tattoos, paint, wounds: written with their time", declared: false },
-  { aspect: "wears", durability: "STATE", holds: "objects", note: "garment objects worn_by the person (E3); declared once the wardrobe (R5, M3) can answer", declared: false },
+  { aspect: "attire", durability: "STATE", holds: "objects", note: "garment objects worn_by the person (E3, WORN-OBJECTS-V1): the complement of `existing` for their rank, age and sex in 1660 London, as items { kind, value, aspects }" },
+  { aspect: "wears", durability: "STATE", holds: "objects", note: "superseded by attire: the garments a person is wearing, from the world's own record", declared: false },
 ];
 // What Photonic declares resolvable now (`attr:<aspect> · resolvable_for · person`). Marks come from the story;
 // wears waits for a wardrobe that can answer, so nobody is memoised as wearing nothing.
 export const DECLARED = ASPECTS.filter(a => a.declared !== false).map(a => a.aspect);
-export const ASPECT = Object.freeze(Object.fromEntries(ASPECTS.map(a => [a.aspect, a])));
+// The aspects describe() words, which the resolver reads canon attributes against (pb.js): `attire` is answered by the garment sampler (src/people/attire.js, through generators.js), not by words about the body.
+export const ASPECT = Object.freeze(Object.fromEntries(ASPECTS.filter(a => a.aspect !== "attire").map(a => [a.aspect, a])));
+
+// The garments' own look aspects (R5, "Clothes as objects"). Garments are entities worn_by a person, minted from our `attire` answer, and pattern-buffer lands a look aspect only on an item whose kind it is declared
+// `resolvable_for` (undeclared ones come back counted as `dropped_aspects`). So colour, material, condition and pattern are declared for each garment kind at world creation. The kinds are ours: each matches
+// [a-z][a-z0-9_]* and is one canonical string, because pattern-buffer does not alias kinds. Different shapes are different kinds. Hat, coif, hood, periwig and cloak come later and are declared when they are built.
+// (Written out here, not imported: src/traits is archived and mirrored on its own. test/garments-objects.test.mjs checks the list against src/people/garments/kinds.js, where the templates are.)
+export const GARMENT_KINDS = ["shift", "bodice", "waistcoat_bodice", "roll_skirt", "plain_skirt", "apron", "neckerchief", "doublet", "skirted_doublet", "petticoat_breeches", "closed_breeches", "falling_band", "stockings"];
+export const GARMENT_ASPECTS = ["colour", "material", "condition", "pattern"];
+/** The opt-in rows for the garments: `attr:<aspect> · resolvable_for · <kind>` for every look aspect and every kind we draw (the person's own aspects are in DECLARED, resolvable_for person). */
+export const GARMENT_DECLARATIONS = GARMENT_ASPECTS.flatMap((aspect) => GARMENT_KINDS.map((kind) => ({ entity: `attr:${aspect}`, attribute: "resolvable_for", value: kind, timeless: true })));

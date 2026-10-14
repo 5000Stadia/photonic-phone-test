@@ -44,7 +44,7 @@ CUTS.man = {
   ...CUTS.adult, doublet: true, flatten: 0, coneEase: 0, ease: 0.0105, rings: 12,
   hemAbove: 0.030, lapDepth: 0.009, laps: 6, lapPhase: 0.5, topRise: 0.012, tableTop: "neck",
   sleeveTop: -0.024, sleeveEnd: 0.97, sleevePuff: 0.004, sleeveRings: 7, innerCut: 0.3, sleeveEase: 0.010, capLift: 0.017,
-  pinRings: 0, pinPut: false, pinSleeve: 3, pinSleeveW: 0.6, pinSide: { rings: [6, 9], sin: 0.85, w: 0.3 }, pinShirt: { rings: 2, w: 0.6 },
+  pinRings: 0, pinPut: false, pinSleeve: 3, pinSleeveW: 0.6, pinSide: { rings: [6, 9], sin: 0.85, w: 0.5 }, pinShirt: { rings: 2, w: 0.6 },
   band: { rings: 4, front: 0.062, side: 0.036, back: 0.042, lift: 0.010 },
   shirt: { rings: 5, puff: 0.014, botDown: 0.030, topIn: 0.016, ease: 0.004 },
   shirtSleeve: { rings: 8, upperRings: 4, from: 0.55, to: 0.97, above: 0.10, puff: 0.020, ease: 0.006, upperEase: 0.006, cuff: 0.008 },
@@ -59,7 +59,7 @@ CUTS.boy = { ...CUTS.man, ease: 0.0095, hemAbove: 0.034, shirt: { ...CUTS.man.sh
 //   wman, wboy             the working doublet: a hem below the natural waist (the skirts to the hip, standing off the hips by `flare` so they clear the closed breeches under them, no waist gap),
 //                          sleeves nearly to the elbow, the shirt's sleeves plain to the wrist, a plain falling band (small). No shirt between doublet and breeches (the doublet covers the waist).
 CUTS.wwoman = {
-  ...CUTS.man, rings: 12, pinSide: { rings: [8, 10], sin: 0.85, w: 0.45 }, hemAbove: -0.030, lapDepth: 0, laps: 0, ease: 0.0140, topRise: 0, neckDrop: { front: 0.022, back: 0.006, side: 0 },
+  ...CUTS.man, rings: 12, pinSide: { rings: [8, 10], sin: 0.85, w: 0.5 }, hemAbove: -0.030, lapDepth: 0, laps: 0, ease: 0.0140, topRise: 0, neckDrop: { front: 0.022, back: 0.006, side: 0 },
   sleeveEnd: 0.96, sleevePuff: 0.002, sleeveRings: 7, innerCut: 0.5, capLift: 0.019, sleeveEase: 0.012, sleeveTop: -0.030,      // (set in plainly: the gentleman's cap with no puff)
   pinShirt: null, shirt: null,
   band: { rings: 4, front: 0.082, side: 0.046, back: 0.050, lift: 0.010 },
@@ -68,7 +68,7 @@ CUTS.wwoman = {
 CUTS.wgirl = { ...CUTS.wwoman, ease: 0.0145 };
 CUTS.wsmall = { ...CUTS.wgirl, ease: 0.0155, hemAbove: -0.028, sleeveEase: 0.015, capLift: 0.024, sleeveTop: -0.036 };
 CUTS.wman = {
-  ...CUTS.man, rings: 15, pinSide: { rings: [10, 12], sin: 0.85, w: 0.3 }, hemAbove: -0.034, lapDepth: 0, laps: 0, flare: 0.045, flareFrom: 0.040, flareDepth: 0.090, hemFront: 0.014, pinHem: { rings: 1, w: 0.5 }, sleevePuff: 0.002, capLift: 0.019, sleeveEase: 0.012, sleeveTop: -0.030, ease: 0.0105, shirt: null, pinShirt: null,
+  ...CUTS.man, rings: 15, pinSide: { rings: [8, 10], sin: 0.85, w: 0.5, also: { rings: [11, 12], w: 0.3 } }, hemAbove: -0.034, lapDepth: 0, laps: 0, flare: 0.045, flareFrom: 0.040, flareDepth: 0.090, hemFront: 0.014, pinHem: { rings: 1, w: 0.5 }, sleevePuff: 0.002, capLift: 0.019, sleeveEase: 0.012, sleeveTop: -0.030, ease: 0.0105, shirt: null, pinShirt: null,
   band: { rings: 4, front: 0.040, side: 0.026, back: 0.030, lift: 0.012 },
   shirtSleeve: { rings: 8, upperRings: 4, from: 0.55, to: 0.97, above: 0.10, puff: 0.008, ease: 0.006, upperEase: 0.006, cuff: 0.004 },
 };
@@ -78,7 +78,7 @@ CUTS.wboy = { ...CUTS.wman, ease: 0.0095, hemAbove: -0.038 };
 // and bound to the reduced mesh. The skin smoothing runs fewer rounds, for the rings are further apart.
 // (rightSleeveOut: the right sleeve is the left's mirror, so the same winding faces inward on it; the full cuts have always been so, which the sweep never saw as it reads sleeves by a ray, and
 // relax() and the lighting see: the reduced cuts wind it outward. Setting it on the full cuts too is one line, and changes the sweep's numbers for the right sleeve.)
-for (const id of ["adult", "girl", "small"]) CUTS[id + "-r"] = { ...CUTS[id], rightSleeveOut: true, N: 24, rings: 8, sleeveN: 12, sleeveRings: 6, skinSmooth: 14 };
+for (const id of ["adult", "girl", "small"]) CUTS[id + "-r"] = { ...CUTS[id], rightSleeveOut: true, refRings: CUTS[id].rings, N: 24, rings: 8, sleeveN: 12, sleeveRings: 6, skinSmooth: 14 };
 // (the gentleman's reduced cuts keep the full cut's rings: a doublet is a close fit from the neck to the hem, and a sleeve nearly to the elbow, which fewer rings cut across)
 for (const id of ["man", "boy", "wwoman", "wgirl", "wsmall", "wman", "wboy"]) CUTS[id + "-r"] = { ...CUTS[id], N: 24, sleeveN: 12, skinSmooth: 14, relaxIters: 3, ease: CUTS[id].ease + 0.003 };
 
@@ -369,6 +369,38 @@ export function bodiceTemplate(near, cutName = "adult") {
 /** What pinShoulders needs of the template's own body: its height and the two shoulder joints (the upper arms'). */
 export const shoulderRef = (w, H) => ({ H, L: Array.from(w.J[BI.upperarmL]), R: Array.from(w.J[BI.upperarmR]), hips: Array.from(w.J[BI.hips]) });
 
+// ---- the torso's pins as a smooth field -------------------------------------------------------------------------------------------------------------------------------
+// pinShoulders draws some of the torso's vertices to where the skeleton puts them. The share (0 to 1) is a function of where the vertex is on the cut, not of which ring or column it is, so the
+// full cut (12 rings, 40 columns) and the reduced one (8 and 24) sample the same field: when it was a step (the top two rings, the columns beyond half the shoulder's reach) the full shell
+// stood up to 3.7 cm off its body-following place from one ring to the next, a cliff the reduced shell's coarser rings and columns could not follow (the far torso's 1.5 to 1.9 cm misses were
+// this, at the straps and the armpit). The steps are now ramps a ring or two or a few columns wide: the ring ramp is fully pinned at the top ring, 0.84 at the next, and reaches one of the full cut's rings below (a wider ramp reaches the cloth over the base layer, which pokes through by up to 13 mm: the sweep).
+const smoothstep = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+export const PIN_RAMP = { rings: 2, below: 1.5, col0: 0.25, col1: 0.55, sinBelow: 0.15, sinAbove: 0.05 };      // (rings: ramp length and where it starts below the first fully pinned ring; col: |x| / the top ring's reach, from to; sin: round the pinSide's own `sin`)
+const FIELDS = new WeakMap();
+/** The pin shares of a template's torso vertices: { idx (the torso vertices with any), raise, put, side (Float32Array each, aligned with idx) }, cached on the template. `raise`: the top rings never lower than
+ *  the skeleton's (a share of the way); `put`: drawn to the shoulder joint's place (the sides of the same rings); `side`: the doublet's armpit (pinSide: its rings, sin and w, as a share). */
+export function pinFieldOf(template) {
+  let f = FIELDS.get(template); if (f) return f;
+  const g = template.grids[0], N = g.around, R = g.rings, cut = template.cut ?? {}, T = template.pos, ref = cut.refRings ?? R, pr = cut.pinRings ?? 2, top = g.start + (R - 1) * N;
+  let rmax = 0; for (let j = 0; j < N; j++) { const x = Math.abs(T[3 * (top + j)]); if (x > rmax) rmax = x; }
+  const idx = [], raise = [], put = [], side = [];
+  for (let k = 0; k < R; k++) for (let j = 0; j < N; j++) {
+    const v = g.start + k * N + j, u = (k / (R - 1)) * (ref - 1) - (ref - pr);      // rings of the full cut above (+) or below (-) its first pinned ring
+    const wr = pr > 0 ? smoothstep((u + PIN_RAMP.below) / PIN_RAMP.rings) : 0, a = Math.abs(T[3 * v]) / (rmax || 1);
+    const wp = cut.pinPut !== false ? wr * smoothstep((a - PIN_RAMP.col0) / (PIN_RAMP.col1 - PIN_RAMP.col0)) : 0;
+    let ws = 0;
+    if (cut.pinSide) {
+      const ps = cut.pinSide, kk = (k / (R - 1)) * (ref - 1), inside = (r) => kk >= r[0] - 1e-6 && kk <= r[1] + 1e-6;
+      const share = inside(ps.rings) ? ps.w : ps.also && inside(ps.also.rings) ? ps.also.w : 0;      // (`also`: more rings at another share)
+      if (share > 0) ws = share * smoothstep((Math.abs(Math.sin((j / N) * 2 * Math.PI)) - (ps.sin - PIN_RAMP.sinBelow)) / (PIN_RAMP.sinBelow + PIN_RAMP.sinAbove));
+    }
+    if (wr > 0 || ws > 0) { idx.push(v); raise.push(wr); put.push(wp); side.push(ws); }
+  }
+  f = { idx: Uint32Array.from(idx), raise: Float32Array.from(raise), put: Float32Array.from(put), side: Float32Array.from(side) };
+  FIELDS.set(template, f);
+  return f;
+}
+
 /** The shoulder girdle is held to the skeleton, and the neckline is never lower than the skeleton says (R5 polish: the bodice's near-to-mid rim gap).
  *  The binding carries a vertex by the triangle of body surface under it, which is right over a chest or a back but not at the shoulder: the straps of the neckline (the top two
  *  rings, where they run over the shoulder) and the sleeve's cap (its first three rings) stand 3 to 5 cm off the surface or on its far side (the template's binding says -5 to +5 cm
@@ -378,25 +410,24 @@ export const shoulderRef = (w, H) => ({ H, L: Array.from(w.J[BI.upperarmL]), R: 
  *  `J` the wearer's rest joints (any tier's: the full body's, the reduced body's or the far table's agree to millimetres), `height` the wearer's. Only + - * /. */
 export function pinShoulders(pos, template, J, height) {
   const ref = template.ref; if (!ref) return pos;
-  const s = height / ref.H, T = template.pos, g = template.grids[0], top = g.start + (g.rings - 1) * g.around, Ju = J[BI.upperarmL], Jv = J[BI.upperarmR];
-  let rmax = 0; for (let j = 0; j < g.around; j++) { const x = Math.abs(T[3 * (top + j)]); if (x > rmax) rmax = x; }
+  const s = height / ref.H, T = template.pos, g = template.grids[0], Ju = J[BI.upperarmL], Jv = J[BI.upperarmR];
   const put = (v, Jp, Jt) => { for (let a = 0; a < 3; a++) pos[3 * v + a] = Jp[a] + (T[3 * v + a] - Jt[a]) * s; };
-  const cutc = template.cut ?? {}, top2 = g.rings - (cutc.pinRings ?? 2);
-  for (let k = top2; k < g.rings; k++) for (let j = 0; j < g.around; j++) {
-    const v = g.start + k * g.around + j, ideal = Ju[1] + (T[3 * v + 1] - ref.L[1]) * s;
-    if (pos[3 * v + 1] < ideal) pos[3 * v + 1] = ideal;
+  const cutc = template.cut ?? {}, F = pinFieldOf(template);
+  for (let n = 0; n < F.idx.length; n++) {
+    const v = F.idx[n], wr = F.raise[n], ideal = Ju[1] + (T[3 * v + 1] - ref.L[1]) * s;
+    if (wr > 0 && pos[3 * v + 1] < ideal) pos[3 * v + 1] += (ideal - pos[3 * v + 1]) * wr;
   }
-  if (cutc.pinPut !== false) for (let k = top2; k < g.rings; k++) for (let j = 0; j < g.around; j++) {
-    const v = g.start + k * g.around + j, x = T[3 * v];
-    if (Math.abs(x) >= 0.5 * rmax) put(v, x > 0 ? Ju : Jv, x > 0 ? ref.L : ref.R);
+  for (let n = 0; n < F.idx.length; n++) {
+    const v = F.idx[n], wp = F.put[n]; if (!(wp > 0)) continue;
+    const x = T[3 * v], Jp = x > 0 ? Ju : Jv, Jt = x > 0 ? ref.L : ref.R;
+    for (let a = 0; a < 3; a++) pos[3 * v + a] += (Jp[a] + (T[3 * v + a] - Jt[a]) * s - pos[3 * v + a]) * wp;
   }
   const pw = cutc.pinSleeveW ?? 1;          // (the share of the way to the pin: 1, all of it, for the bodice; the doublet's close sleeve takes part of it, so a broad shoulder is not held to the template's)
   for (const [part, Jp, Jt] of [[1, Ju, ref.L], [2, Jv, ref.R]]) { const q = template.grids[part]; for (let k = 0; k < (cutc.pinSleeve ?? 3); k++) for (let m = 0; m < q.around; m++) { const v = q.start + k * q.around + m; if (pw === 1) put(v, Jp, Jt); else for (let a = 0; a < 3; a++) pos[3 * v + a] += (Jp[a] + (T[3 * v + a] - Jt[a]) * s - pos[3 * v + a]) * pw; } }
   // the doublet's armpit and the band's free edge: where a close fit meets the arm's root the two meshes' bodies differ by a centimetre or two and the cloth follows each, so these vertices are drawn a share
   // (`pinSide.w`) of the way to where the shoulder joint puts them (the same in every tier): the sides of the torso's rings `pinSide.rings` and the band's last ring
   if (cutc.pinSide) {
-    const ps = cutc.pinSide, w = ps.w, blend = (v, Jp, Jt) => { for (let a = 0; a < 3; a++) pos[3 * v + a] += (Jp[a] + (T[3 * v + a] - Jt[a]) * s - pos[3 * v + a]) * w; };
-    for (let k = ps.rings[0]; k <= ps.rings[1]; k++) for (let j = 0; j < g.around; j++) { const v = g.start + k * g.around + j; if (Math.abs(Math.sin((j / g.around) * 2 * Math.PI)) >= ps.sin) blend(v, T[3 * v] > 0 ? Ju : Jv, T[3 * v] > 0 ? ref.L : ref.R); }
+    for (let n = 0; n < F.idx.length; n++) { const v = F.idx[n], ws = F.side[n]; if (ws > 0) { const Jp = T[3 * v] > 0 ? Ju : Jv, Jt = T[3 * v] > 0 ? ref.L : ref.R; for (let a = 0; a < 3; a++) pos[3 * v + a] += (Jp[a] + (T[3 * v + a] - Jt[a]) * s - pos[3 * v + a]) * ws; } }
   }
   // the shirt's bottom rings, inside the breeches' waistband, are drawn a share of the way to where the hip joint puts them (the same in every tier): they are not seen, and the body's own differences there are
   if (cutc.pinShirt && ref.hips) {

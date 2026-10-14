@@ -34,6 +34,16 @@ export function bind(points, bodyPos, index = BODY_INDEX, anchors = points, norm
   return { n, ids, w, off, dist, smooth: !!normals };
 }
 
+/** One point bound to the given triangle (body vertices a, b, c): the point of it nearest the point itself, and the offset in the triangle's frame, as bind() does for the triangle it finds;
+ *  for choosing among several triangles (reduced.js tuneBinding). Returns { ids [a, b, c], w [u, v, w], off [t, b, n], dist }. */
+export function bindToTriangle(px, py, pz, bodyPos, a, b, c, normals = null) {
+  const P = bodyPos, q = new Float64Array(7);
+  closestOnTriangle(px, py, pz, P[3 * a], P[3 * a + 1], P[3 * a + 2], P[3 * b], P[3 * b + 1], P[3 * b + 2], P[3 * c], P[3 * c + 1], P[3 * c + 2], q);
+  const fr = frame(P, a * 3, b * 3, c * 3, normals, q[3], q[4], q[5]), dx = px - q[0], dy = py - q[1], dz = pz - q[2];
+  const off = [(dx * fr.tx + dy * fr.ty + dz * fr.tz) / fr.s, (dx * fr.bx + dy * fr.by + dz * fr.bz) / fr.s, (dx * fr.nx + dy * fr.ny + dz * fr.nz) / fr.s];
+  return { ids: [a, b, c], w: [q[3], q[4], q[5]], off, dist: off[2] * fr.s, d2: dx * dx + dy * dy + dz * dz };
+}
+
 const F = { tx: 0, ty: 0, tz: 0, bx: 0, by: 0, bz: 0, nx: 0, ny: 0, nz: 0, s: 1 };
 // The triangle's frame: the first edge as the tangent, the normal either the face's or, given the body's vertex normals N and the point's barycentric weights, the
 // smooth one blended from the three vertices'. A garment standing centimetres off a creased body (a sagging bust, a belly's folds) is placed along the smooth normal, so the

@@ -382,7 +382,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         const bo = rgb(rec, "bodice", rec.dressing.look.bodice), sk = rgb(rec, "skirt", rec.dressing.look.skirt);
         D[o + 16] = bo[0]; D[o + 17] = bo[1]; D[o + 18] = bo[2]; D[o + 19] = sh.blocks;          // the person's first block of the tier's passes
         D[o + 20] = sk[0]; D[o + 21] = sk[1]; D[o + 22] = sk[2]; D[o + 23] = gslot;
-        if (rec.dressing.look.stockings) { const st = rgb(rec, "stockings", rec.dressing.look.stockings); D[o + 24] = st[0]; D[o + 25] = st[1]; D[o + 26] = st[2]; }
+        if (rec.dressing.look.stockings) { const off = rec.dressing.wear.hose === false, st = off ? rgb(rec, "bare", rec.dressing.look.shift) : rgb(rec, "stockings", rec.dressing.look.stockings);          /* no stockings worn: the legs are the base layer's, its linen */ D[o + 24] = st[0]; D[o + 25] = st[1]; D[o + 26] = st[2]; }
         if (e.skirt) {
           const sd = e.skirt.specData, row = specRow(rec), at = sh.blocks * SPEC_TEXELS * 4;
           sd.set(row, at);

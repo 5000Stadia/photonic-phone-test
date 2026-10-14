@@ -35,10 +35,18 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
         return true;
       },
       perceives: () => ({ seen: [], heard: [] }),                       // M4
-      // what she wears is state, read every frame and never rebaked: `wear("bodice" | "skirt", false)` takes a garment off (the draw switches to the class without it, the base layer
-      // stays), `true` puts it on. Returns false for someone who wears no outfit or no such garment.
-      wear(garment, on = true) { const d = rec.dressing; if (!d || !(garment in d.wear)) return false; d.wear[garment] = !!on; return true; },
-      worn: () => { const d = rec.dressing; return d ? { ...d.wear } : null; },
+      // What they wear (R5, "Clothes as objects"; garments/worn.js). `wear(garments)` gives them these garments, [{ id, kind, aspects: { colour, material, condition, pattern } }] (pattern-buffer's worn objects), in place of what they had,
+      // and answers the dressing: { drawn, unworn, notDrawn (a kind we have no template for, or one covered by a more outer one), conflicts (two in one slot: the outermost wins), fallback (the nearest class we can draw,
+      // when none draws the set), colours, class, shift }. The shift is always on: wear([]) leaves it. Nobody is drawn unclothed. A change of outfit package makes the draw bake it again; a change of colour or of
+      // what is worn within a package is read at the next frame.
+      // The old form stays: `wear("bodice" | "skirt", false)` takes the torso's or the legs' garments off (the draw switches to the class without it, the base layer stays), `true` puts them on. It returns false for someone who wears
+      // no outfit or no such garment.
+      wear(garment, on = true) {
+        if (Array.isArray(garment)) { const r = rec.setGarments(garment); if (r.restyled) draw.release(rec); return r.attire; }
+        const d = rec.dressing; if (!d || !(garment in d.wear)) return false; d.wear[garment] = !!on; return true;
+      },
+      worn: () => rec.garments(),             // the garments they wear, [{ id, kind, aspects }], the shift among them
+      dressing: () => rec.attire,             // the report of the last wear (or of what the crowd's rule gave them): what is drawn and what is not
       bounds: () => ({ half: rec.half, height: rec.height, reach: 0.42 * rec.height }),
       state: () => pop.state(id),
     };

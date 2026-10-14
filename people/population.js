@@ -9,7 +9,11 @@ import { resolve } from "../traits/resolve.js";
 import { uniform, seedOf } from "../traits/stream.js";
 import { paramsFor, build, buildNear, farBody } from "./bodies.js";
 import { makeWalker } from "./walk.js";
-import { outfitFor, dressingFor } from "./outfits.js";
+import { outfitFor, dressGarments, dressingOfWorn } from "./outfits.js";
+import { resolveOutfit, baseOnly } from "./garments/worn.js";
+import { look as silkLook } from "./garments/outfit.js";
+import { KINDS } from "./garments/kinds.js";
+const KINDS_SLOT = Object.fromEntries(Object.entries(KINDS).map(([k, v]) => [k, v.slot]));
 
 // A person's record. A class, not an object with a getter per person: the record is read in every loop of the tick, and records that share one shape (every field made here, in the
 // same order, the getters on the prototype) keep those reads fast, where per-person getters gave each record a shape of its own. What is built, it is built on first need, so people
@@ -24,8 +28,8 @@ class Person {
     // what the walking keeps (population.js) and the drawing keeps (draw.js), all here so the shape never changes
     this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined; this.bumped = undefined;
     this.offRoute = undefined; this.lastGood = undefined; this.replan = undefined;
-    this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this.nearGarment = undefined; this.specRow = undefined;
-    this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._speed = undefined; this._rate = undefined;
+    this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this._cstockings = undefined; this._cbare = undefined; this.nearGarment = undefined; this.specRow = undefined;
+    this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._attire = null; this._whole = null; this._garments = undefined; this._prefer = null; this._speed = undefined; this._rate = undefined;
   }
   get bodyParams() { return (this._params ??= paramsFor(this.res.values, this.res.derived)); }
   get body() { return (this._body ??= build(this.bodyParams)); }
@@ -33,14 +37,57 @@ class Person {
   get far() { return (this._far ??= farBody(this.bodyParams)); }   // the far tier's person and the walker's joints, from the table: no body is built for them
   // what the person wears (outfits.js; a placeholder rule until M3's sampler): null for the base layer only. A wearer's skirt widens the radius they ask of the floor, and their
   // walker keeps the arms out of the skirt (keepout.js), baked into the walk.
-  get dressing() {
-    if (this._dressing === undefined) {
-      const outfits = this.env.outfits, o = outfits ? outfits(this.id, this.res.values) : null;
-      // a rule answers an outfit, or { outfit, look } when it also chooses the colours (dress-words.js); the placeholder answers an outfit
-      this._dressing = o ? dressingFor(this.id, o.outfit ?? o, this.bodyParams, this.far.J, o.outfit ? o.look : undefined) : null;
-      if (this._dressing) this.half = Math.max(this.half, this._dressing.footprint);
+  get dressing() { if (this._dressing === undefined) this._dress(); return this._dressing; }
+  /** The report of what they wear and what of it is drawn (garments/worn.js resolveWorn): always there, for the base layer only too. An outfit worn whole (the crowd's rule) has its report made when it is asked for. */
+  get attire() {
+    if (this._dressing === undefined) this._dress();
+    return this._attire ??= resolveOutfit(this._dressing.outfit, this._whole, this.id, this.res.values.age);
+  }
+  // Dress the person: from the garments they were given (wear(list)), else from the rule (a rule answers an outfit, `{ outfit, look }` when it also chooses the colours (dress-words.js), or a list of garments: { garments }).
+  // An outfit is a thin wrapper: it is the list of garments it is (garmentsOf), worn whole, and that is all the 300 people added at load need, so nothing more is made for them until the report is asked for.
+  _dress() {
+    const v = this.res.values, rule = this.env.outfits;
+    let garments = this._garments, prefer = this._prefer ?? null, none = null;       // (prefer: what they were wearing before, so taking things off keeps their cut)
+    this._attire = null; this._whole = null;
+    if (garments === undefined) {
+      const o = rule ? rule(this.id, v) : null, arr = Array.isArray(o) ? o : o?.garments;
+      if (arr) garments = arr;
+      else if (o) {
+        const only = o.outfit ?? o, lk = { ...silkLook(uniform(0, this.id, "silk"), only, uniform(0, this.id, "hose")), ...(o.outfit ? o.look : undefined) };
+        lk.shift = only.palette.shift; this._whole = lk;
+        this._dressing = dressingOfWorn({ outfit: only, look: lk, mask: 3 }, this.bodyParams, this.far.J);
+        return this._settle();
+      } else none = rule ? "the crowd's rule gives no outfit" : "nobody is dressed";
     }
-    return this._dressing;
+    if (none) { this._dressing = null; this._attire = baseOnly([], none); }
+    else {
+      const r = dressGarments(this.id, garments, this.bodyParams, this.far.J, { age: v.age, sex: v.sex }, { prefer });
+      this._dressing = r.dressing; this._attire = r.attire;
+    }
+    this._settle();
+  }
+  _settle() {          // her skirt's radius is part of her footprint
+    this.half = Math.max(0.18, 0.13 * this.height);
+    if (this._dressing) this.half = Math.max(this.half, this._dressing.footprint);
+  }
+  /** The garments they are wearing, [{ id, kind, aspects }], the shift among them: the ones they were given, or the outfit the rule dressed them in as garments. What the old `wear("bodice" | "skirt", false)` took off is not in it. */
+  garments() {
+    const d = this.dressing, a = this.attire;
+    let list = a.garments.map((g) => ({ ...g, aspects: { ...g.aspects } }));
+    if (!list.some((g) => g.kind === "shift")) list.unshift({ id: `${this.id}/shift`, kind: "shift", aspects: { colour: d?.look.shift ?? "white", material: "linen" } });
+    if (d) list = list.filter((g) => { const k = KINDS_SLOT[g.kind], w = d.wear; return !((k === "torso" || k === "neck") && !w.bodice) && !((k === "legs" || k === "over") && !w.skirt) && !(k === "neck" && w.neck === false) && !(k === "over" && w.apron === false) && !(k === "hose" && w.hose === false); });
+    return list;
+  }
+  /** Give them these garments to wear (replacing what they had). Returns { attire, restyled }: the report, and whether the outfit package changed, so what was baked for the old one (the draw's slots, the walker's keep-out) must be made again. */
+  setGarments(list) {
+    const was = this._dressing === undefined ? this.dressing : this._dressing, before = was?.outfit?.id ?? null;
+    this._prefer = was?.outfit ?? this._prefer ?? null;
+    this._garments = (list ?? []).map((g, i) => ({ id: g?.id ?? `${this.id}/garment${i}`, kind: g?.kind ?? null, aspects: { ...(g?.aspects ?? {}) } }));
+    this._dressing = undefined; this._cshift = this._cbodice = this._cskirt = this._cstockings = undefined; this._cbare = undefined; this.specRow = undefined;
+    void this.dressing;
+    const after = this._dressing?.outfit?.id ?? null, restyled = before !== after;
+    if (restyled) this._walker = undefined;           // (the same gait, from the same seed: only the arms' keep-out for what is worn is made again)
+    return { attire: this._attire, restyled };
   }
   get walker() {
     if (this._walker !== undefined) return this._walker;
