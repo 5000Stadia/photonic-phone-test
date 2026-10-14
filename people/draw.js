@@ -38,7 +38,8 @@ const TEXELS = 4, TEXELS_DRESSED = 7;      // an instance takes 4 agent texels: 
 const MID_SKIRT = { rings: 16, around: 32 };    // mid's skirt: 32 columns (24 left up to 2.5 cm between it and near's 40 in a stride; 32 is within 1 cm: tools/people/switch-check.mjs)
 const FAR_SKIRT = { rings: 16, around: 24 };    // the far class's skirt: 24 columns, no bridging (16 columns left 3.1 to 3.6% of a dressed person's pixels differing from mid's at 4 to 10 m, over check.mjs's 3%: the hem and the silhouette)
 const LATER_AFTER_UPDATES = 4;               // compile()'s deferred classes start compiling this many frames in
-const DRESSED_FAR_CAP = 256;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's, half as many: the same textures)
+const BAND_SHADE = 0.62;                   // kind 7's colour: the skirt's, this much of it (the working man's knee band)
+const DRESSED_FAR_CAP = 512;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's and the workman's, half as many: the same textures). 256 until the working dress: with four in five dressed, a plaza of 300 has about 340 blocks
 
 export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4 } = {}) {
   // nobody is ever drawn unclothed: both topologies must carry the base layer's cloth flag
@@ -212,16 +213,17 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     if (outfit) m.side = THREE.DoubleSide;
     const rowBase = outfit ? (e.rowBase = uniform(0, "int")) : null;           // a dressed class's first row in its tier's agent texture
     const i = rowBase ? int(instanceIndex).add(rowBase) : int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
-    const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings
+    const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings, 7 the skirt's colour darkened (a knee band)
     const L = outfit ? layoutOf(e.kind, outfit) : null;
     const col = (k) => textureLoad(agentTex, ivec2(k, i)).rgb;
     if (!outfit) m.colorNode = varying(mix(mix(col(3), col(2), step(0.5, paint.w)), paint.rgb, step(1.5, paint.w)));
     else {
-      const k = paint.w, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k).mul(float(1).sub(step(5.5, k))));
+      const k = paint.w, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k).mul(float(1).sub(step(5.5, k))));      // (kind 7, the garment's band: the skirt's colour a shade darker, below)
       let c = mix(col(3), col(2), step(0.5, k).mul(float(1).sub(step(1.5, k))));                       // skin, or the tint (kind 1)
       c = mix(c, col(4), step(2.5, k).mul(float(1).sub(step(3.5, k))));                                 // the bodice
       c = mix(c, col(5), step(3.5, k).mul(float(1).sub(step(4.5, k))));                                 // the skirt
-      c = mix(c, col(6), step(5.5, k));                                                                 // the stockings
+      c = mix(c, col(6), step(5.5, k).mul(float(1).sub(step(6.5, k))));                                 // the stockings
+      c = mix(c, col(5).mul(BAND_SHADE), step(6.5, k));                                                 // the knee band: the skirt's (breeches') colour a shade darker
       m.colorNode = varying(mix(c, paint.rgb, own));
     }
     const walk = walkNode();

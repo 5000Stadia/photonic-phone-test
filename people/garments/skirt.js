@@ -51,6 +51,18 @@ SKIRTS.breeches = {
   short: 1, kneeShare: 0.5, drop: 0.014, lateral: [0.15, 0.5], legs: true,
 };
 
+// The working dress's two loose pieces (R5 working dress; r5-dress-1660.md: the working woman's skirt "ankle length, no roll", Hollar's country woman, the working man's closed breeches).
+// workwoman: the stateless skirt with no bum roll (the hips only a little eased, the waist drawn in by the apron strings), ankle length (the hem about 7 cm above the floor at 1.62 m: the shoe and
+// the stocking show) and hanging fairly straight, with no train: the hem 0.24 of the waist's height at the sides and 0.25 at the back, instead of the gentlewoman's 0.36 and 0.45. The girl's and the small child's (workgirl, worksmall) are the gentlewoman's girl's and child's with the same narrower hem, shorter.
+SKIRTS.workwoman = {
+  waistSpine: 0.7, ease: 0.012, roll: { side: 0.012, back: 0.020, front: 0.008 }, hem: { side: 0.24, front: 0.24, back: 0.25 }, bell: 0.9,
+  hemClear: 0.050, legClear: 0.007, sway: 0.014, bend: 0.15,
+};
+SKIRTS.workgirl = { ...SKIRTS.girl, hem: { side: 0.25, front: 0.25, back: 0.26 }, bell: 0.8, hemClear: 0.045 };
+SKIRTS.worksmall = { ...SKIRTS.small, hem: { side: 0.30, front: 0.30, back: 0.31 }, bell: 0.8, hemClear: 0.040 };
+// closed: the working man's breeches, the gentleman's divided machinery with the petticoat's fullness taken out: a close fit with a little ease at the seat, ending just below the knee (the band's rings are painted a shade darker, outfit.painted.band) and gathered close to it (no ribbon, no bag).
+SKIRTS.closed = { ...SKIRTS.breeches, bellyAbs: 0.060, ease: 0.034, roll: { side: 0.025, back: 0.050, front: 0.020 }, hemEase: 0.004, bag: 0.002, drop: 0.032 };
+
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -122,7 +134,8 @@ export function skirtSpec(near, cutName = "gentlewoman") {
     const t = k / R_HIP, y = lerp(lm.waistY, A1[1], t), cz = lerp(A0[2], A1[2], t), seg = planeSegments(w.pos, hipTris, [0, y, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]);
     let sx = 0, sz0 = Infinity, sz1 = -Infinity;
     for (let i = 0; i < seg.length; i += 2) { if (seg[i] > sx) sx = seg[i]; if (seg[i + 1] < sz0) sz0 = seg[i + 1]; if (seg[i + 1] > sz1) sz1 = seg[i + 1]; }
-    if (sx > 0) { const eb = (c.belly ?? 1.5) * e; rs[k] = Math.max(rs[k], sx + eb - (c.short ? shiftAt(k) * dHip : 0)); rf[k] = Math.max(rf[k], sz1 - cz + eb); rb[k] = Math.max(rb[k], cz - sz0 + eb); }          // the belly with more room: it moves against the pelvis's ring when the trunk bends
+    // (bellyAbs, in H: the room beyond the body at the hip ring, growing from the waist: close breeches under a doublet that covers the waist keep their waistband inside it)
+    if (sx > 0) { const eb = c.bellyAbs !== undefined ? c.bellyAbs * H * Math.pow(k / R_HIP, 1.5) : (c.belly ?? 1.5) * e; rs[k] = Math.max(rs[k], sx + eb - (c.short ? shiftAt(k) * dHip : 0)); rf[k] = Math.max(rf[k], sz1 - cz + eb); rb[k] = Math.max(rb[k], cz - sz0 + eb); }          // the belly with more room: it moves against the pelvis's ring when the trunk bends
   }
   // the legs
   const foot = (() => {   // the foot as a capsule from the ankle to the toe tip: its radius

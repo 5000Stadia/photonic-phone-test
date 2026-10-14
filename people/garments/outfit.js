@@ -22,8 +22,10 @@ export const MEAN_BODIES = {
   man: { sex: 0.85, age: 30, build: 0.5, muscle: 0.5, height: 1.74, skin: "#c99a74" },
   boy: { sex: 0.85, age: 9, build: 0.5, muscle: 0.5, height: 1.35, skin: "#c99a74" },
 };
+// the working dress takes the same mean bodies: each cut of it is its own template, cut on the body of its age
+for (const [w, c] of [["wwoman", "adult"], ["wgirl", "girl"], ["wsmall", "small"], ["wman", "man"], ["wboy", "boy"]]) MEAN_BODIES[w] = MEAN_BODIES[c];
 // the cut whose skin weights and topology every cut of an outfit shares (the class mesh's attributes are static): each outfit's first cut
-export const BASE_CUT = { adult: "adult", girl: "adult", small: "adult", man: "man", boy: "man" };
+export const BASE_CUT = { adult: "adult", girl: "adult", small: "adult", man: "man", boy: "man", wwoman: "wwoman", wgirl: "wwoman", wsmall: "wwoman", wman: "wman", wboy: "wman" };
 
 export const GENTLEWOMAN = {
   id: "gentlewoman",
@@ -130,7 +132,108 @@ export const GENTLEMAN = {
     shift: "#f3f0e8",
   },
 };
-export const OUTFITS = { gentlewoman: GENTLEWOMAN, gentleman: GENTLEMAN };
+// "workwoman", London 1660 (R5 working dress): the laced waistcoat bodice with elbow sleeves over the linen shift, an ankle-length skirt with no roll, a linen apron, a linen neckerchief. The evidence is
+// Hollar's country woman (Rijksmuseum RP-P-OB-11.528, 1643: laced bodice, kerchief, long apron), Pepys's "waistcoat" (21 Aug 1660, the working bodice's name), Vermeer's Milkmaid for the sleeves
+// (Dutch, c.1660) and the reenactors' guides (SECONDHAND): r5-dress-1660.md, "Working woman". What I assumed: the bodice is plain and close-fitting, laced up the front with a cord (painted), the
+// neckline a modest scoop with the neckerchief over it; the shift's sleeves are plain to the wrist (a working woman pushed them up in work: not modelled); the apron is white linen to just above the
+// hem (a coloured apron was also usual: one colour for all here); the coif waits for the hair work (the neckerchief is in). The slots are the gentlewoman's: the shell is "bodice", the loose piece "skirt".
+export const WORKWOMAN = {
+  id: "workwoman",
+  period: "London 1660 (Hollar, Mulier Anglica Habitans in Pago, 1643; Pepys 21 Aug 1660; r5-dress-1660.md, the working woman)",
+  ages: { from: 1.5, to: Infinity, note: "all ages from 1.5 years; a small child and a girl are dressed as small women (the girl's and the child's cuts of the waistcoat, with their own ankle skirts)" },
+  cuts: [
+    { id: "wsmall", ages: [1.5, 5], bodice: "wsmall", skirt: "worksmall", note: "a child in a soft laced bodice and an ankle skirt, apron" },
+    { id: "wgirl", ages: [5, 13], bodice: "wgirl", skirt: "workgirl", note: "a small working woman's waistcoat cut from the girl's own landmarks, an ankle skirt, apron" },
+    { id: "wwoman", ages: [13, Infinity], bodice: "wwoman", skirt: "workwoman", note: "the laced waistcoat to the waist, elbow sleeves; the ankle skirt with no roll, narrower than the gentlewoman's" },
+  ],
+  slots: { shell: "bodice", loose: "skirt", tubes: 1 },
+  stuff: { 0: "bodice", 1: "bodice", 2: "bodice", 3: "linen", 4: "linen", 5: "linen", 6: "linen", 7: "linen", 8: "linen" },
+  pieces: [
+    { id: "bodice", kind: "shell", parts: ["torso", "sleeveL", "sleeveR"], bind: "mhclo", skin: "torso rigid on the chest, spine and hips; sleeves on the upper arm, the cap sewn to the chest", verts: "close-fitting rings from the waist to the base of the neck, the neckline scooped at the front; sleeves nearly to the elbow, close; the front lacing painted" },
+    { id: "neckerchief", kind: "shell", parts: ["band"], bind: "mhclo", skin: "rigid with the bodice's top rings (the falling band's mechanism)", verts: "4 rings of linen lying on the neckline, a bib in front, over the shoulders" },
+    { id: "shift sleeves", kind: "shell", parts: ["shirtSleeveL", "shirtSleeveR", "shirtForearmL", "shirtForearmR"], bind: "mhclo", skin: "rigid on the upper arm and the forearm", verts: "the shift's sleeves from under the bodice's sleeve to the wrist, plain, in linen" },
+    { id: "skirt", kind: "loose", profile: "pose-following tube of 16 rings x 40, ankle length, no roll (SKIRTS.workwoman; workgirl and worksmall for the young)", verts: 640 },
+    { id: "apron", kind: "painted", note: "linen on the skirt's front rings 1 to 13, a quarter of the way round (45 degrees each side of the front: a whole number of columns, 5, 4 and 3, at 40, 32 and 24, so the edges are one line at every tier): the skirt's own vertices, the apron's edge on duplicated vertices at near so it is sharp (soft over a column at mid and far), no new pass" },
+    { id: "stockings", kind: "painted", note: "the legs below the hem take the stockings' colour (kind 6) and the feet the shoes' (kind 5)" },
+  ],
+  hides: { piece: "bodice", body: "template.hides.region (torso, and upper arms)", baseLayer: "kept (nobody is drawn unclothed)", legs: "kept: the skirt stops at the ankle" },
+  loose: {
+    piece: "skirt", stateless: true,
+    inputs: ["hips, thighL/R, shinL/R, footL/R, toeL/R bones (world rotation and joint position)", "floor height", "seat height (0 for none)", "gait phase", "sway amplitude"],
+    hem: "ankle length: held about 8 cm above the floor at 1.62 m", footprint: "skirtFootprint(spec): the skirt widens its wearer's footprint for stepping aside (less than the gentlewoman's: no roll, a narrower bell)",
+  },
+  hair: { fit: "over", neckline: "the neckerchief lies over the hair at the back", covered: ["coif", "hat"], coif: "not in this outfit (it needs the hair-under-hat family)", periwig: false },
+  // the base layer reads as the shift: white linen, its collar cut a little above the waistcoat's neckline (the neckerchief lies over the cut)
+  layer: { reads: "linen shift (smock)", colour: "#f3f0e8", neck: "bodice", margin: 0.030 },
+  painted: { stockings: {}, shoes: "#14100e", lacing: { colour: "#efe9d8" }, apron: { colour: "#f3f0e8", rings: [1, 13], half: 0.785 } },
+  keepout: { volumes: ["skirt"], clearance: 0.008, note: "the skirt's rings at their design radii and the legs inside it, as the gentlewoman's" },
+  // working dyes (r5-dress-1660.md, Dorking Museum and the reenactors' guides: the cheap end is grey, brown, weld yellow and madder; greens and blues cost more): each stands off every skin tone of the
+  // ramp by 22 (test/workdress.test.mjs). The browns (russet, tawny, brown) are out as the gentleman's were: every brown within reach of the ramp is within 22 of its dark end; a greyish "drab" (undyed
+  // wool faded to tan) is the nearest that clears it. Bodice and skirt are often two cloths: some pairs are mixed.
+  palette: {
+    silks: [
+      { id: "drab wool", bodice: "#7b7563", skirt: "#837c6a" },
+      { id: "grey wool", bodice: "#55585d", skirt: "#6d6d6a" },
+      { id: "woad blue", bodice: "#3b5778", skirt: "#4d6785" },
+      { id: "dull green", bodice: "#46603c", skirt: "#56703f" },
+      { id: "madder red", bodice: "#a8453a", skirt: "#b34c41" },
+      { id: "weld yellow", bodice: "#a68a30", skirt: "#b69a3a" },
+      { id: "grey over blue", bodice: "#55585d", skirt: "#4d6785" },
+      { id: "drab over green", bodice: "#7b7563", skirt: "#56703f" },
+    ],
+    stockings: [{ id: "cream", rgb: "#f1ecde" }, { id: "grey", rgb: "#8a8c94" }, { id: "blue-grey", rgb: "#4f6c8c" }, { id: "drab", rgb: "#8d8672" }],
+    shift: "#f3f0e8",
+  },
+};
+
+// "workman", London 1660 (R5 working dress): a plain doublet with its skirts to the hip, closed breeches to just below the knee in a darker band, stockings and shoes, a plain falling band, the shirt's sleeves to the wrist. The thinnest
+// evidence of the wardrobe (r5-dress-1660.md: no open image of a London working man of 1660; Laroon's Cries of 1687, a generation late, show knee-length coats and slops; the jerkin is from reenactors'
+// guides, SECONDHAND). What I assumed: a doublet and breeches of one plain cloth, the doublet's skirts to the hip with no laps and no waist gap (the shirt is not seen between), the sleeves close and
+// nearly to the elbow with the shirt's sleeves below (plain linen: rolled sleeves, as in work), the breeches close with a tight knee band and no ribbon. The jerkin over it, the cap and the apron
+// of a trade are not in it. The slots are the gentleman's: the shell is "bodice", the loose piece "skirt" (two tubes).
+export const WORKMAN = {
+  id: "workman",
+  period: "London 1660 (r5-dress-1660.md, the working man: Pepys's doublets and breeches, Laroon 1687, reenactors' guides)",
+  ages: { from: 6, to: Infinity, note: "men from 13 and breeched boys from 6; a boy under 6 is in skirts, which is not this outfit" },
+  cuts: [
+    { id: "wboy", ages: [6, 13], bodice: "wboy", skirt: "closed", note: "a small working man's doublet and breeches, cut from the boy's own landmarks" },
+    { id: "wman", ages: [13, Infinity], bodice: "wman", skirt: "closed", note: "the doublet with its skirts to the hip, closed breeches to the knee" },
+  ],
+  slots: { shell: "bodice", loose: "skirt", tubes: 2 },
+  stuff: { 0: "doublet", 1: "doublet", 2: "doublet", 3: "linen", 4: "linen", 5: "linen", 6: "linen", 7: "linen", 8: "linen" },
+  pieces: [
+    { id: "doublet", kind: "shell", parts: ["torso", "sleeveL", "sleeveR"], bind: "mhclo", skin: "torso rigid on the chest, spine and hips; sleeves on the upper arm, the cap sewn to the chest", verts: "close-fitting rings from a hem 8 cm below the waist (skirts to the hip, flaring over the breeches) to the base of the neck; sleeves nearly to the elbow, close" },
+    { id: "band", kind: "shell", parts: ["band"], bind: "mhclo", skin: "rigid with the doublet's top rings", verts: "4 rings lying on the doublet's top, a small plain falling band, in linen" },
+    { id: "shirt sleeves", kind: "shell", parts: ["shirtSleeveL", "shirtSleeveR", "shirtForearmL", "shirtForearmR"], bind: "mhclo", skin: "rigid on the upper arm and the forearm", verts: "the shirt's sleeves from under the doublet's sleeve to the wrist, plain" },
+    { id: "breeches", kind: "loose", profile: "two pose-following tubes of 16 rings, one on each leg, waist to a tight knee band: the skirt's machinery (SKIRTS.closed, the gentleman's with the petticoat's fullness taken out)", verts: "2 x 640 at near, 2 x 512 at mid, 2 x 384 at far" },
+    { id: "stockings", kind: "painted", note: "the legs below the hips take the stockings' colour (kind 6) and the feet the shoes' (kind 5)" },
+  ],
+  hides: { piece: "doublet", body: "template.hides.region (torso, and upper arms)", baseLayer: "kept (nobody is drawn unclothed)", legs: "kept: the breeches stop at the knee, and the stockings are the legs painted" },
+  loose: {
+    piece: "breeches", stateless: true, tubes: 2,
+    inputs: ["hips, spine, thighL/R, shinL/R bones (world rotation and joint position)", "floor height", "seat height (0 for none)", "gait phase", "sway amplitude"],
+    hem: "at the knees, a little below them: the knee band", footprint: "skirtFootprint(spec): the wider tube of the two",
+  },
+  hair: { fit: "over", neckline: "the falling band lies over the hair at the back", covered: ["hat", "cap"], hat: "not in this outfit (it needs the hair-under-hat family)", periwig: false },
+  layer: { reads: "linen shirt and drawers under the breeches", colour: "#f3f0e8", neck: "doublet", margin: 0.012 },
+  painted: { stockings: {}, shoes: "#14100e", band: { rings: 2 } },          // the knee band: the last two rings of each tube in the breeches' colour darker (kind 7, draw.js BAND_SHADE)
+  keepout: { volumes: ["breeches (two tubes)", "the legs' capsules"], legs: true, clearance: 0.008, note: "both tubes' rings at their design radii and the legs inside them (close breeches follow the legs); the doublet's torso is not asked, his arms hang beside it" },
+  // the doublet and the breeches are usually one cloth (Pepys's suits), sometimes two: some pairs are mixed. Dyes as the workwoman's: no browns (they fail the skin bar), a greyish drab instead.
+  palette: {
+    silks: [
+      { id: "drab wool", bodice: "#7b7563", skirt: "#837c6a" },
+      { id: "grey wool", bodice: "#5a5d62", skirt: "#6d6d6a" },
+      { id: "woad blue", bodice: "#3f5b7c", skirt: "#4d6785" },
+      { id: "dull green", bodice: "#4a6340", skirt: "#56703f" },
+      { id: "drab over grey", bodice: "#7b7563", skirt: "#6d6d6a" },
+      { id: "green over grey", bodice: "#4a6340", skirt: "#6d6d6a" },
+      { id: "grey over drab", bodice: "#5a5d62", skirt: "#837c6a" },
+    ],
+    stockings: [{ id: "cream", rgb: "#f1ecde" }, { id: "grey", rgb: "#8a8c94" }, { id: "blue-grey", rgb: "#4f6c8c" }, { id: "drab", rgb: "#8d8672" }],
+    shift: "#f3f0e8",
+  },
+};
+export const OUTFITS = { gentlewoman: GENTLEWOMAN, gentleman: GENTLEMAN, workwoman: WORKWOMAN, workman: WORKMAN };
 
 /** The colours of one wearer's outfit, from a number in [0, 1) the caller took from a hash (a garment choice is a hash, never a random stream): { id, bodice, sleeve,
  *  skirt, shift } as "#rrggbb". */
@@ -143,7 +246,7 @@ export function look(u, outfit = GENTLEWOMAN, u2 = 0) {
 
 /** The keep-out of a wearer's arms for this outfit (keepout.js): the skirt's swell and the legs inside it, from the wearer's skirt spec (an array of two, the tubes of the breeches), their rest joints J (the walker's) and their height. */
 export function keepOutFor(spec, J, height, outfit = GENTLEWOMAN) {
-  if (outfit.loose.tubes === 2) return armKeepOut(J, height, (bones, ctx) => spec.map((sp, i) => skirtVolume(sp, bones, ctx, i)), { clearance: outfit.keepout.clearance });          // the divided breeches: both tubes
+  if (outfit.loose.tubes === 2) return armKeepOut(J, height, (bones, ctx) => [...spec.map((sp, i) => skirtVolume(sp, bones, ctx, i)), ...(outfit.keepout.legs ? legVolumes(spec[0], bones) : [])], { clearance: outfit.keepout.clearance });          // (close breeches follow the legs, so the legs' own capsules are asked too: the tube's wall is the legs' where they stride past its design radii)          // the divided breeches: both tubes
   return armKeepOut(J, height, (bones, ctx) => [skirtVolume(spec, bones, ctx), ...legVolumes(spec, bones)]);
 }
 

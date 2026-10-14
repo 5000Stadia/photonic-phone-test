@@ -24,7 +24,7 @@
 //   skinIndex (Uint16 x4), skinWeight (Float32 x4)   the body's, the bodice's (the ADULT cut's weights for every cut: one static set), zeros for the skirt (it is not skinned)
 //   paint (Float32 x4: r, g, b, kind)   kind 0 the person's skin, 1 the person's tint (the base layer, when the outfit declares none), 2 the vertex's own colour (eyes), 3 the bodice (the
 //                 person's bodice colour), 4 the skirt (the person's skirt colour), 5 the shift (the base layer when the outfit declares one: rgb is the outfit's layer colour, linear).
-//                 6 the stockings (the person's own, agent texel 6; an outfit's `painted`).
+//                 6 the stockings (the person's own, agent texel 6; an outfit's `painted`). 7 the skirt's colour a shade darker (the working man's knee band, outfit.painted.band).
 //                 near: the layer's vertices are 5; reduced and far: the body's cloth vertices (MID.paint.w = 1) are 5, except those above the shift's cut line on the adult's mean reduced
 //                 body (the neckline of the reduced bodice plus the layer's margin), which are 0, bare neck and shoulders. The near layer's cut stays the per-person number layerCut. At reduced and far the
 //                 bodice's top ring (its neckline's edge) is 5 as well, a painted band standing for the shift's edge, which the 2 cm triangles cannot cut.
@@ -148,10 +148,27 @@ export function indexWithout(hidden) {
   return Uint16Array.from(o);
 }
 
+/** The apron of an outfit (outfit.painted.apron: { rings: [r0, r1], half (rad) }) on a skirt of `rings` x `around`: its rectangle of columns -h..h (h the columns in `half`, wrapping at the front) and rings r0..r1, and the
+ *  vertices of that rectangle's rim, which are duplicated so the apron's edge is sharp (`apron.soft` lists the tiers where it is not: the mid and far skirts are other meshes of the same cloth, 32 and 24 columns, unbridged at far, and a sharp
+ *  white edge on them moves a centimetre or two against the tier before it, which the tier-switch check reads as 5% of a person's pixels against its bar of 3%; their edge is the rectangle's own vertices, a soft one over a column): a duplicate is painted the apron's colour and used by the apron's quads only, the original keeps the skirt's. Or null. */
+export function apronOf(outfit, rings, around, tier = "near") {
+  const a = outfit.painted?.apron; if (!a) return null;
+  const sharp = !a.soft?.includes(tier);
+  const h = Math.max(1, Math.round(a.half / (2 * Math.PI / around))), r0 = a.rings[0], r1 = Math.min(a.rings[1], rings - 2), dup = new Map(), rim = [];
+  const col = (j) => (j + around) % around, id = (k, j) => k * around + col(j);
+  for (let k = r0; k <= r1; k++) for (let j = -h; j <= h; j++) if (sharp && (k === r0 || k === r1 || j === -h || j === h)) { dup.set(id(k, j), dup.size); rim.push([k, col(j)]); }
+  return { h, r0, r1, dup, rim, inside: (k, j) => k >= r0 && k <= r1 && j >= -h && j <= h, id, col };
+}
 /** The skirt tube's triangles for `rings` x `around` vertices, vertex k * around + j the ring k's column j (the same winding as skirt.js SKIRT_INDEX, which is the 16 x 40 one). */
-export function skirtIndexFor(rings, around) {
-  const t = [];
-  for (let k = 0; k < rings - 1; k++) for (let j = 0; j < around; j++) { const a = k * around + j, b = k * around + (j + 1) % around, c = (k + 1) * around + (j + 1) % around, d = (k + 1) * around + j; t.push(a, c, b, a, d, c); }
+export function skirtIndexFor(rings, around, apron = null) {
+  const t = [], base = rings * around;
+  // (with an apron, its quads (columns -h..h-1 and rings r0..r1-1) take the duplicates of the rim's vertices, which come after the tube's own)
+  const at = (k, j, ap) => { const i = k * around + j; return ap && apron.dup.has(i) ? base + apron.dup.get(i) : i; };
+  for (let k = 0; k < rings - 1; k++) for (let j = 0; j < around; j++) {
+    const jj = apron && j > around / 2 ? j - around : j, ap = !!apron && k >= apron.r0 && k < apron.r1 && jj >= -apron.h && jj < apron.h, j1 = (j + 1) % around;
+    const a = at(k, j, ap), b = at(k, j1, ap), c = at(k + 1, j1, ap), d = at(k + 1, j, ap);
+    t.push(a, c, b, a, d, c);
+  }
   return Uint16Array.from(t);
 }
 
@@ -166,7 +183,7 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
   if (!PROFILES[tier]) throw new Error("outfitLayout: tier " + tier);
   const prof = { ...PROFILES[tier], ...opts }, key = `${outfit.id}|${tier}|${prof.rings}|${prof.around}`;
   let L = layouts.get(key); if (L) return L;
-  const near = tier === "near", body = near ? NEAR : MID, bodyV = body.V, base = BASE_CUT[outfit.cuts[0].bodice], tpl = near ? templateFor(base) : reducedTemplateFor(base), bodiceV = tpl.V, { rings, around } = prof, tubes = outfit.loose.tubes ?? 1, skirtV = tubes * rings * around, V = bodyV + bodiceV + skirtV;
+  const near = tier === "near", body = near ? NEAR : MID, bodyV = body.V, base = BASE_CUT[outfit.cuts[0].bodice], tpl = near ? templateFor(base) : reducedTemplateFor(base), bodiceV = tpl.V, { rings, around } = prof, tubes = outfit.loose.tubes ?? 1, apron = apronOf(outfit, rings, around, tier), skirtV = tubes * rings * around + (apron ? apron.dup.size : 0), V = bodyV + bodiceV + skirtV;
   const skinIndex = new Uint16Array(V * K), skinWeight = new Float32Array(V * K), paint = new Float32Array(V * 4), skirtRC = new Float32Array(V * 3);
   skinIndex.set(body.skinIndex); skinWeight.set(body.skinWeight); paint.set(body.paint);
   skinIndex.set(tpl.skin.skinIndex, bodyV * K); skinWeight.set(tpl.skin.skinWeight, bodyV * K);
@@ -203,18 +220,31 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
     const lin = rgbOf(outfit.layer.colour);
     for (let i = 0; i < bodiceV; i++) if (outfit.stuff[tpl.part[i]] === "linen") { paint.set(lin, 4 * (bodyV + i)); paint[4 * (bodyV + i) + 3] = 5; }
   }
+  // the front lacing (outfit.painted.lacing): the torso's front column, every other ring, in the cord's colour (kind 5): the colours are made per vertex and blend into the cloth over the quad either side, which
+  // reads as a laced front at 2 to 4 m (a painted line, no geometry)
+  if (outfit.painted?.lacing) {
+    const g0 = tpl.grids[0], c = rgbOf(outfit.painted.lacing.colour);
+    for (let k = 0; k < g0.rings - 1; k += 2) { const v = bodyV + g0.start + k * g0.around; paint.set(c, 4 * v); paint[4 * v + 3] = 5; }
+  }
   // the shift's edge at mid and far: the reduced mesh's triangles are 2 cm, so the near tier's 6 mm line cannot be cut there (the cloth vertices just under the line are left bare
   // instead, above) and the edge vanished. A painted band stands for it: the bodice's top ring, its neckline all round, takes the shift's colour (kind 5, the layer's own), and the
   // vertex colours blend it into the silk over the first ring below. A static attribute: it costs the shader and the far tier nothing.
   if (!near && outfit.layer) { const g0 = tpl.grids[0], top = bodyV + g0.start + (g0.rings - 1) * g0.around, c = rgbOf(outfit.layer.colour); for (let j = 0; j < g0.around; j++) { paint.set(c, 4 * (top + j)); paint[4 * (top + j) + 3] = 5; } }
   // the skirt's vertices: tube (a leg, for the divided breeches), ring and column; the last rings of a tube may be a ribbon (outfit.painted: kind 5, the ribbon's colour)
-  const rib = outfit.painted?.ribbon ? rgbOf(outfit.painted.ribbon) : null, ribRings = outfit.painted?.ribbonRings ?? 0;
+  const rib = outfit.painted?.ribbon ? rgbOf(outfit.painted.ribbon) : null, ribRings = outfit.painted?.ribbonRings ?? 0, shade = outfit.painted?.band?.rings ?? 0, tubeV = tubes * rings * around;
   for (let i = 0; i < skirtV; i++) {
-    const v = bodyV + bodiceV + i, tube = Math.floor(i / (rings * around)), r = i % (rings * around);
-    paint[4 * v + 3] = 4; skirtRC[3 * v] = Math.floor(r / around); skirtRC[3 * v + 1] = r % around; skirtRC[3 * v + 2] = tube;
+    const v = bodyV + bodiceV + i, dupe = i >= tubeV, o = dupe ? apron.rim[i - tubeV] : null, tube = dupe ? 0 : Math.floor(i / (rings * around)), r = i % (rings * around);
+    paint[4 * v + 3] = 4; skirtRC[3 * v] = dupe ? o[0] : Math.floor(r / around); skirtRC[3 * v + 1] = dupe ? o[1] : r % around; skirtRC[3 * v + 2] = tube;
     if (rib && skirtRC[3 * v] >= rings - ribRings) { paint.set(rib, 4 * v); paint[4 * v + 3] = 5; }
+    else if (shade && skirtRC[3 * v] >= rings - shade) paint[4 * v + 3] = 7;          // the knee band, the breeches' colour darker (kind 7)
   }
-  const hidden = near ? null : hiddenReduced(outfit), bodyIndex = { all: body.index, cut: near ? body.index : indexWithout(hidden) }, skirtIdx = (() => { const one = skirtIndexFor(rings, around), o = new Uint16Array(one.length * tubes); for (let t = 0; t < tubes; t++) for (let q = 0; q < one.length; q++) o[t * one.length + q] = one[q] + t * rings * around; return o; })(), cache = new Map();
+  // the apron (outfit.painted.apron): the linen of the rectangle's duplicated rim, and of the vertices inside it (the originals on the rim keep the skirt's colour for the quads outside it)
+  if (apron) {
+    const c = rgbOf(outfit.painted.apron.colour), put = (v) => { paint.set(c, 4 * v); paint[4 * v + 3] = 5; };
+    for (let i = 0; i < apron.dup.size; i++) put(bodyV + bodiceV + tubeV + i);
+    for (let k = apron.r0; k <= apron.r1; k++) for (let j = -apron.h; j <= apron.h; j++) if (!apron.dup.has(apron.id(k, j))) put(bodyV + bodiceV + apron.id(k, j));
+  }
+  const hidden = near ? null : hiddenReduced(outfit), bodyIndex = { all: body.index, cut: near ? body.index : indexWithout(hidden) }, skirtIdx = (() => { const one = skirtIndexFor(rings, around, apron), o = new Uint16Array(one.length * tubes); for (let t = 0; t < tubes; t++) for (let q = 0; q < one.length; q++) o[t * one.length + q] = one[q] + (one[q] >= rings * around ? 0 : t * rings * around); return o; })(), cache = new Map();
   L = {
     tier, outfit: outfit.id, bodyV, bodiceV, skirtV, V, rings, around, skinIndex, skinWeight, paint, skirtRC, hidden, bodiceIndex: tpl.index, skirtIndex: skirtIdx,
     ranges: { body: [0, bodyV], bodice: [bodyV, bodyV + bodiceV], skirt: [bodyV + bodiceV, V] },

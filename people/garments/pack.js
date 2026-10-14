@@ -1,5 +1,5 @@
 // The garment templates, packed (R5; tools/people/garment-pack.mjs writes it): what a runtime needs of the six bodice templates (the full and the reduced cut of each of three
-// cuts), so no phone builds one at first sight (a template takes about 0.4 s to cut and bind). Data: spikes/makehuman/data/garments-<outfit>.{json,bin.gz} (gentlewoman: six templates; gentleman: four).
+// cuts), so no phone builds one at first sight (a template takes about 0.4 s to cut and bind). Data: spikes/makehuman/data/garments-<outfit>.{json,bin.gz} (gentlewoman and workwoman: six templates each; gentleman and workman: four).
 //   header.templates[id]  id "full:adult", "reduced:girl", ...: { cutName, V, templateH, count (full only: the body vertices hidden), grids, arrays: { name: [type, byteOffset, length] } }
 //   the blob              each array as written, 4-byte aligned: index u16, part u8, ring u8, edge u8, pos f32, bindIds u16, bindW f32, bindOff f32, bindDist f32, skinIndex u16, skinWeight f32,
 //                         region u8 (full only: the hides' region id of each drawn body vertex)
@@ -9,12 +9,12 @@
 import { gz, json } from "../../spikes/makehuman/load.js";
 import { CUTS, reducedHides } from "./bodice.js";
 
-const DATA = new URL("../../spikes/makehuman/data/", import.meta.url), NAMES = ["garments-gentlewoman", "garments-gentleman"];
+const DATA = new URL("../../spikes/makehuman/data/", import.meta.url), NAMES = ["garments-gentlewoman", "garments-gentleman", "garments-workwoman", "garments-workman"];
 const TYPES = { u8: Uint8Array, u16: Uint16Array, f32: Float32Array };
 
 // one pack a family of outfits (the template ids are unique across them: "full:adult", "full:man"...): the headers and blobs of those that exist
-const PACKS = [];
-for (const name of NAMES) { try { PACKS.push({ name, header: await json(new URL(name + ".json", DATA)), blob: await gz(new URL(name + ".bin.gz", DATA)) }); } catch { /* no pack: the callers build */ } }
+// (fetched together, one round trip for all of them)
+const PACKS = (await Promise.all(NAMES.map(async (name) => { try { const [header, blob] = await Promise.all([json(new URL(name + ".json", DATA)), gz(new URL(name + ".bin.gz", DATA))]); return { name, header, blob }; } catch { return null; /* no pack: the callers build */ } }))).filter(Boolean);
 export const PACK = PACKS.find((p) => p.name === "garments-gentlewoman")?.header ?? null;
 export const PACK_OF = (name) => PACKS.find((p) => p.name === name)?.header ?? null;
 

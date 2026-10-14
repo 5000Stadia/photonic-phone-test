@@ -3,7 +3,10 @@
 import { loadTable } from "../../spikes/makehuman/table.js";
 import { unpackSpec, SPEC_CHANNELS } from "./skirt.js";
 
-const TABLES = { gentlewoman: await loadTable("skirt-table-gentlewoman"), girl: await loadTable("skirt-table-girl"), small: await loadTable("skirt-table-small"), breeches: await loadTable("skirt-table-breeches").catch(() => null) };      // (null until tools/people/skirt-table.mjs --only breeches has written it)
+// (fetched together: the working dress's four more tables must not lengthen loading by a round trip each)
+const NAMES = ["gentlewoman", "girl", "small", "breeches", "workwoman", "workgirl", "worksmall", "closed"], OPTIONAL = new Set(["breeches", "workwoman", "workgirl", "worksmall", "closed"]);
+const LOADED = await Promise.all(NAMES.map((n) => loadTable("skirt-table-" + n).catch((e) => { if (OPTIONAL.has(n)) return null; throw e; })));
+const TABLES = Object.fromEntries(NAMES.map((n, i) => [n, LOADED[i]]));      // (null until tools/people/skirt-table.mjs --only breeches has written it)
 const scratch = new Float64Array(SPEC_CHANNELS);
 
 /** The skirt spec of a person (their body params: sex, age, muscle, build, height) for a skirt cut ("gentlewoman", "girl", "small"), or the tube of one leg (1 left, -1 right) of the divided "breeches". */

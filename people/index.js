@@ -6,7 +6,7 @@
 
 import { makePopulation } from "./population.js";
 import { makeDraw } from "./draw.js";
-import { GENTLEWOMAN, GENTLEMAN } from "./garments/outfit.js";
+import { GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN } from "./garments/outfit.js";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
@@ -46,9 +46,9 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
 
   return {
     group: draw.group,
-    /** Make the draws a renderer will need (the base class, and the placeholder rule's gentlewoman and gentleman unless `outfits` is false or a rule of your own) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
+    /** Make the draws a renderer will need (the base class, and the placeholder rule's four outfits (gentlewoman, gentleman, workwoman, workman) unless `outfits` is false or a rule of your own) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
      *  behind a loading screen instead of at the first frame. Returns how many draws there are. Draws made later, for a class not warmed, still come when someone is first in it. */
-    warm: () => draw.warm(outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN, GENTLEMAN]),
+    warm: () => draw.warm(outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN]),
     /** Compile what warm() made on a renderer, concurrently (see draw.js compile), the skirts' render-to-texture passes too, which `renderer.compileAsync(scene, camera)` does not reach. Use it beside that call:
      *  `await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera)])`, with the group already in the scene. */
     compile: (renderer, scene, camera, opts) => draw.compile(renderer, scene, camera, opts),

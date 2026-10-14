@@ -51,13 +51,36 @@ CUTS.man = {
 };
 CUTS.boy = { ...CUTS.man, ease: 0.0095, hemAbove: 0.034, shirt: { ...CUTS.man.shirt, puff: 0.012 } };
 
+// The working dress (R5 working dress; r5-dress-1660.md: the working woman's laced waistcoat with elbow sleeves, and the working man's doublet with its skirts, a jerkin's worth of cloth). Both are the
+// doublet's mode again, close-fitting rings from a hem to the neck, so the machinery (the binding, the rigid skin, the band that follows the top rings, the shirt's sleeves in two pieces) is the gentleman's:
+//   wwoman, wgirl, wsmall  the laced waistcoat bodice: a hem at the waist (no waist gap, no laps, no stays' point), the neckline scooped (`neckDrop`) below the base of the neck at the front, sleeves close
+//                          and nearly to the elbow, the shift's forearm sleeves below them (parts 7, 8: plain, to the wrist) and a linen neckerchief (the band, part 3) lying on the neckline. No shirt between bodice
+//                          and skirt (the skirt hangs from the waist: part 4 is empty). The front lacing is painted (reduced.js outfitLayout, outfit.painted.lacing).
+//   wman, wboy             the working doublet: a hem below the natural waist (the skirts to the hip, standing off the hips by `flare` so they clear the closed breeches under them, no waist gap),
+//                          sleeves nearly to the elbow, the shirt's sleeves plain to the wrist, a plain falling band (small). No shirt between doublet and breeches (the doublet covers the waist).
+CUTS.wwoman = {
+  ...CUTS.man, rings: 12, pinSide: { rings: [8, 10], sin: 0.85, w: 0.45 }, hemAbove: -0.030, lapDepth: 0, laps: 0, ease: 0.0140, topRise: 0, neckDrop: { front: 0.022, back: 0.006, side: 0 },
+  sleeveEnd: 0.96, sleevePuff: 0.002, sleeveRings: 7, innerCut: 0.5, capLift: 0.019, sleeveEase: 0.012, sleeveTop: -0.030,      // (set in plainly: the gentleman's cap with no puff)
+  pinShirt: null, shirt: null,
+  band: { rings: 4, front: 0.082, side: 0.046, back: 0.050, lift: 0.010 },
+  shirtSleeve: { rings: 8, upperRings: 4, from: 0.55, to: 0.95, above: 0.10, puff: 0.012, ease: 0.006, upperEase: 0.006, cuff: 0.004 },
+};
+CUTS.wgirl = { ...CUTS.wwoman, ease: 0.0145 };
+CUTS.wsmall = { ...CUTS.wgirl, ease: 0.0155, hemAbove: -0.028, sleeveEase: 0.015, capLift: 0.024, sleeveTop: -0.036 };
+CUTS.wman = {
+  ...CUTS.man, rings: 15, pinSide: { rings: [10, 12], sin: 0.85, w: 0.3 }, hemAbove: -0.034, lapDepth: 0, laps: 0, flare: 0.045, flareFrom: 0.040, flareDepth: 0.090, hemFront: 0.014, pinHem: { rings: 1, w: 0.5 }, sleevePuff: 0.002, capLift: 0.019, sleeveEase: 0.012, sleeveTop: -0.030, ease: 0.0105, shirt: null, pinShirt: null,
+  band: { rings: 4, front: 0.040, side: 0.026, back: 0.030, lift: 0.012 },
+  shirtSleeve: { rings: 8, upperRings: 4, from: 0.55, to: 0.97, above: 0.10, puff: 0.008, ease: 0.006, upperEase: 0.006, cuff: 0.004 },
+};
+CUTS.wboy = { ...CUTS.wman, ease: 0.0095, hemAbove: -0.038 };
+
 // The reduced cuts (R5, mid and far tiers; reduced.js): the same generator at lower resolution (24 round, 8 rings, sleeves 12 x 6: 336 vertices; fewer sleeve rings or columns put the sleeve cap 2 to 3 cm off the full one, which the far check measures), cut on the cut's own mean body
 // and bound to the reduced mesh. The skin smoothing runs fewer rounds, for the rings are further apart.
 // (rightSleeveOut: the right sleeve is the left's mirror, so the same winding faces inward on it; the full cuts have always been so, which the sweep never saw as it reads sleeves by a ray, and
 // relax() and the lighting see: the reduced cuts wind it outward. Setting it on the full cuts too is one line, and changes the sweep's numbers for the right sleeve.)
 for (const id of ["adult", "girl", "small"]) CUTS[id + "-r"] = { ...CUTS[id], rightSleeveOut: true, N: 24, rings: 8, sleeveN: 12, sleeveRings: 6, skinSmooth: 14 };
 // (the gentleman's reduced cuts keep the full cut's rings: a doublet is a close fit from the neck to the hem, and a sleeve nearly to the elbow, which fewer rings cut across)
-for (const id of ["man", "boy"]) CUTS[id + "-r"] = { ...CUTS[id], N: 24, sleeveN: 12, skinSmooth: 14, relaxIters: 3, ease: CUTS[id].ease + 0.003 };
+for (const id of ["man", "boy", "wwoman", "wgirl", "wsmall", "wman", "wboy"]) CUTS[id + "-r"] = { ...CUTS[id], N: 24, sleeveN: 12, skinSmooth: 14, relaxIters: 3, ease: CUTS[id].ease + 0.003 };
 
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -83,18 +106,21 @@ function generate(w, table, lm, cut) {
   const H = lm.H, N = cut.N, Kr = cut.rings, pos = [], anchor = [], part = [], ring = [], edgeRing = [], tri = [], grids = [{ start: 0, rings: Kr, around: N }];
   const doublet = !!cut.doublet;
   // the doublet's hem (above the natural waist, with laps hanging below it) and its top (the base of the neck)
-  const hemAt = (th) => lm.waistY + H * (cut.hemAbove - cut.lapDepth * Math.pow(0.5 + 0.5 * Math.cos(cut.laps * th + cut.lapPhase * Math.PI), 2)), topY = lm.neckY + H * (cut.topRise ?? 0);
+  const hemAt = (th) => lm.waistY + H * (cut.hemAbove + (cut.hemFront ?? 0) * Math.pow(Math.max(0, Math.cos(th)), 2) - cut.lapDepth * Math.pow(0.5 + 0.5 * Math.cos(cut.laps * th + cut.lapPhase * Math.PI), 2)), topY = lm.neckY + H * (cut.topRise ?? 0);
+  // (the working woman's waistcoat and the workman's doublet, same mode: `neckDrop` scoops the neckline below the base of the neck at the front and back; `flare` (from `flareFrom` above the waist, over `flareDepth`) stands the skirts off the hips toward the hem, so
+  // a doublet whose hem is below the waist clears the breeches under it)
+  const topAt = (th) => { const c = Math.cos(th), f = Math.max(0, c), b = Math.max(0, -c), nd = cut.neckDrop; return nd ? topY - H * (nd.front * f * f + nd.back * b * b + (nd.side ?? 0) * Math.sin(th) ** 2) : topY; };
   const bottom = (th) => { const c = Math.cos(th), b = Math.max(0, -c), a = Math.abs(((th + Math.PI) % (2 * Math.PI)) - Math.PI); return lm.waistY - H * (cut.sideDrop + cut.pointDrop * Math.pow(Math.max(0, 1 - a / cut.pointHalf), cut.pointPow) + (cut.backDrop - cut.sideDrop) * b * b); };
   const top = (th) => { const c = Math.cos(th), s = Math.sin(th), f = Math.max(0, c), b = Math.max(0, -c); return lm.shoulderY - H * (cut.topSide * s * s + cut.topFront * f * f + cut.topBack * b * b); };
   // torso rings
   for (let k = 0; k < Kr; k++) for (let j = 0; j < N; j++) {
-    const th = (j / N) * 2 * Math.PI, yb = doublet ? hemAt(th) : bottom(th), yt = doublet ? topY : top(th), t = k / (Kr - 1), y = lerp(yb, yt, t);
+    const th = (j / N) * 2 * Math.PI, yb = doublet ? hemAt(th) : bottom(th), yt = doublet ? topAt(th) : top(th), t = k / (Kr - 1), y = lerp(yb, yt, t);
     // radius: the body's cross-section there, flattened to the front's hull
     const dy = table.dy, n = Math.max(2, Math.round((yt - yb) / dy) + 1), ys = new Float64Array(n), rs = new Float64Array(n);
     for (let i = 0; i < n; i++) { ys[i] = yb + (i / (n - 1)) * (yt - yb); rs[i] = table.at(th, ys[i]); }
     const hull = upperHull(ys, rs), front = Math.pow(Math.max(0, Math.cos(th)), 1.5) * cut.flatten;
     const rb = table.at(th, y), r = lerp(rb, Math.max(rb, hull(y)), front);
-    const ease = H * (cut.ease + cut.coneEase * (1 - t) * Math.pow(Math.max(0, Math.cos(th)), 2));
+    const ease = H * (cut.ease + cut.coneEase * (1 - t) * Math.pow(Math.max(0, Math.cos(th)), 2) + (cut.flare ? cut.flare * Math.pow(Math.max(0, Math.min(1, (lm.waistY + H * (cut.flareFrom ?? 0) - y) / (H * cut.flareDepth))), 1.2) : 0));
     const c = table.centre(y);
     pos.push(c[0] + (r + ease) * Math.sin(th), y, c[1] + (r + ease) * Math.cos(th));
     anchor.push(c[0] + rb * Math.sin(th), y, c[1] + rb * Math.cos(th));                  // the surface it stands off from
@@ -153,7 +179,7 @@ function generate(w, table, lm, cut) {
     // the shell's surface at (th, y): the body's own section there, and the centre of the section
     const surf = (th, y, extra) => { const rb = table.at(th, y), c = table.centre(y), r = rb + extra; return { p: [c[0] + r * sinc(th), y, c[1] + r * Math.cos(th)], a: [c[0] + rb * sinc(th), y, c[1] + rb * Math.cos(th)] }; };
     // the falling band (part 3): rings lying on the doublet's top, from the free edge (ring 0) up to the neck (the last ring), bib-fronted: it drops further at the front than at the sides and back
-    const bd = cut.band; grids.push({ start: pos.length / 3, rings: bd.rings, around: N });
+    const bd = cut.band ?? { rings: 0 }; grids.push({ start: pos.length / 3, rings: bd.rings, around: N });
     for (let k = 0; k < bd.rings; k++) for (let j = 0; j < N; j++) {
       const th = tauN(j), f = Math.max(0, Math.cos(th)), b = Math.max(0, -Math.cos(th)), drop = H * Math.hypot(bd.front * f, bd.side * Math.abs(sinc(th)), bd.back * b), y = topY + 0.006 * H - drop * (1 - k / (bd.rings - 1));
       const q = surf(th, y, H * (cut.ease + bd.lift));
@@ -162,7 +188,7 @@ function generate(w, table, lm, cut) {
     for (let k = 0; k < bd.rings - 1; k++) for (let j = 0; j < N; j++) { const base = grids[3].start, a = base + k * N + j, bb = base + k * N + (j + 1) % N, c = base + (k + 1) * N + (j + 1) % N, d = base + (k + 1) * N + j; tri.push(a, bb, c, a, c, d); }
     // the shirt (part 4) between the breeches and the doublet: from inside the breeches' waistband (botDown below the waist) to inside the doublet's hem; it blouses over the gap, at nothing
     // at the waistband and at the hem and `puff` between
-    const sh = cut.shirt; grids.push({ start: pos.length / 3, rings: sh.rings, around: N });
+    const sh = cut.shirt ?? { rings: 0 }; grids.push({ start: pos.length / 3, rings: sh.rings, around: N });      // (a cut without a shirt band or a falling band has the grid empty: the part numbers stay the same for every cut of the doublet's mode)
     for (let k = 0; k < sh.rings; k++) for (let j = 0; j < N; j++) {
       const th = tauN(j), t = k / (sh.rings - 1), yb = lm.waistY - H * sh.botDown, yt = hemAt(th) + H * sh.topIn, y = lerp(yb, yt, t), u = Math.max(0, (y - lm.waistY) / (yt - lm.waistY));
       const q = surf(th, y, H * (sh.ease + sh.puff * Math.pow(sinc(Math.PI * u), 0.8)));
@@ -216,8 +242,8 @@ export function bodiceSkin(g, binding, w, lm, cut) {
   const tb = bind(Float32Array.from(tp), w.pos, torsoTris, Float32Array.from(ta)), tskin = blendSkin(tb, w.skinIndex, w.skinWeight);       // the body's own weights at the surface point it stands off from
   tv.forEach((v, i) => { for (let k = 0; k < K; k++) { si[v * K + k] = tskin.skinIndex[i * K + k]; sw[v * K + k] = tskin.skinWeight[i * K + k]; } });
   smoothSkin(g.grids[0], si, sw, cut.skinSmooth);              // stays are rigid: neighbouring rings turn together, so the cloth never folds between them
-  if (cut.doublet) smoothSkin(g.grids[4], si, sw, cut.skinSmooth);
-  if (cut.doublet) {                                           // the band is rigid with the doublet's top rings under it: the same weights, column for column
+  if (cut.doublet && g.grids[4].rings > 0) smoothSkin(g.grids[4], si, sw, cut.skinSmooth);
+  if (cut.doublet && g.grids[3].rings > 0) {                                           // the band is rigid with the doublet's top rings under it: the same weights, column for column
     const gb = g.grids[3], gt = g.grids[0];
     for (let k = 0; k < gb.rings; k++) for (let j = 0; j < gb.around; j++) { const a = gb.start + k * gb.around + j, b = gt.start + (gt.rings - gb.rings + k) * gt.around + j; for (let q = 0; q < K; q++) { si[a * K + q] = si[b * K + q]; sw[a * K + q] = sw[b * K + q]; } }
   }
@@ -376,6 +402,12 @@ export function pinShoulders(pos, template, J, height) {
   if (cutc.pinShirt && ref.hips) {
     const gs = template.grids[4], hJ = J[BI.hips], w = cutc.pinShirt.w;
     for (let k = 0; k < cutc.pinShirt.rings; k++) for (let j = 0; j < gs.around; j++) { const v = gs.start + k * gs.around + j; for (let a = 0; a < 3; a++) pos[3 * v + a] += (hJ[a] + (T[3 * v + a] - ref.hips[a]) * s - pos[3 * v + a]) * w; }
+  }
+  // the doublet's skirts: where they hang below the waist over the hips, the hem's rings follow the hip bones' differences between the full and the reduced body (the buttocks of an elder differ by two centimetres)
+  // and the binding carries them, so the hem's first `pinHem.rings` rings are drawn a share (`w`) of the way to where the hip joint puts them (the same in every tier)
+  if (cutc.pinHem && ref.hips) {
+    const hJ = J[BI.hips], w = cutc.pinHem.w;
+    for (let k = 0; k < cutc.pinHem.rings; k++) for (let j = 0; j < g.around; j++) { const v = g.start + k * g.around + j; for (let a = 0; a < 3; a++) pos[3 * v + a] += (hJ[a] + (T[3 * v + a] - ref.hips[a]) * s - pos[3 * v + a]) * w; }
   }
   // the falling band lies on the doublet: each vertex of it is its doublet column's vertex (the ring `rings - bands + k` under it) and the template's offset between the two, so it follows the doublet's fit
   // (the same in every tier) and the doublet's close shell is never through it
