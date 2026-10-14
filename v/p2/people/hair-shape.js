@@ -1,5 +1,5 @@
 // Linear .mhclo-style maps, packed on toddler, child and adult bodies.
-import { gz } from '../../spikes/makehuman/load.js';
+import { gz } from '../spikes/makehuman/load.js';
 import { RED } from './shape.js';
 export const HAIR = JSON.parse(new TextDecoder().decode(await gz(new URL('./data/hair.json.gz', import.meta.url))));
 for (const s of Object.values(HAIR.styles)) {
