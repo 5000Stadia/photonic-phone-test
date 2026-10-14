@@ -416,3 +416,6 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
   return L;
 }
 export { CUTS, pseudoAngle };
+
+// Cached derived CPU data; existing populations retain their own references.
+export function clearReducedCaches() { UNION = null; reduced.clear(); builtReduced.clear(); HIDDEN.clear(); layouts.clear(); meanReducedBodies.clear(); }

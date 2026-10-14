@@ -56,7 +56,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const V = TEMPLATE.V;                                       // far and mid share the reduced mesh; near has its own count (NEAR.V)
   const group = new THREE.Group(); group.name = "people";
   const contact = makeContactShadow(THREE, capacity); group.add(contact.mesh);
-  const surfaces = new WeakMap();
+  let surfaces = new WeakMap();
+  let disposed = false;
+  const slotStores = new Set(), pendingCompiles = new Set(), activeBuilds = new Set();
+  let disposal;
+  const trackBuild = (result) => {
+    const pending = Promise.resolve(result).finally(() => activeBuilds.delete(pending));
+    activeBuilds.add(pending);
+    return pending;
+  };
   const half16 = (src) => { const o = new Uint16Array(src.length); for (let i = 0; i < src.length; i++) o[i] = THREE.DataUtils.toHalfFloat(src[i]); return o; };
 
   // ---- the shared walk texture: slots of F+1 frames x 2B rows (quaternion row, offset row per bone) ----
@@ -125,6 +133,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       return s;
     };
     st.release = (rec) => { if (st.slots.has(rec.id)) { st.free.push(st.slots.get(rec.id)); st.slots.delete(rec.id); } };
+    slotStores.add(st);
     return st;
   }
   // mid and near are drawn together in a frame at most as many as there are: nobody drawn this frame is evicted
@@ -449,6 +458,49 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
 
   return {
     group,
+    dispose() {
+      if (disposed) return disposal;
+      disposed = true;
+      group.removeFromParent();
+      startLater = null;
+      for (const cancel of pendingCompiles) cancel();
+      pendingCompiles.clear();
+      // A renderer's compileAsync cannot be aborted. Keep its inputs alive until
+      // already-started work settles, then dispose once (including late GPU work).
+      const free = () => {
+        hair.dispose();
+        // Class materials/geometries and dressed agent textures are shared.
+        const resources = new Set([walkTex, deltaTex, normalDeltaTex]);
+        for (const e of entries.values()) resources.add(e.tex);
+        for (const sh of Object.values(dressedTiers)) {
+          resources.add(sh.tex);
+          sh.skirt?.dispose();
+          sh.data = null; sh.skirt = null;
+        }
+        for (const st of slotStores) {
+          resources.add(st.tex);
+          st.slots.clear(); st.free.length = st.nodes.length = 0;
+          st.data = st.tex = null;
+        }
+        slotStores.clear();
+        group.traverse(object => {
+          if (object.geometry) resources.add(object.geometry);
+          for (const m of Array.isArray(object.material) ? object.material : [object.material]) if (m) resources.add(m);
+          // InstancedMesh owns an instance buffer in addition to its geometry.
+          if (object.isInstancedMesh) object.dispose();
+        });
+        for (const resource of resources) resource.dispose();
+        group.removeFromParent(); group.clear();
+        entries.clear(); classKeys.clear(); sharedAttrs.clear(); garmentFrom.clear();
+        for (const cache of [layouts, gstores, baseGeometry, dressedMaterials, dressedTiers]) for (const key of Object.keys(cache)) delete cache[key];
+        surfaces = new WeakMap();
+        walkNodes.length = freeWalk.length = 0;
+        walkData = walkTex = null;
+      };
+      if (activeBuilds.size) disposal = Promise.allSettled([...activeBuilds]).then(free);
+      else free();
+      return disposal;
+    },
     /** Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
     update(sorted) {
       budgetLeft = bakeBudgetMs;
@@ -509,14 +561,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       // A pass renders from inside the scene's render (RTTNode.updateBefore), so three gives it the render context of its call depth (RenderContexts.get): compile it as that, or its code and pipeline would be
       // built again at the first frame (r186's private names again; if they are not there, the pass builds at the first render).
       const compilePass = ({ pass, depth }) => {
+        if (disposed) return;
         const rc = renderer._renderContexts, get = rc?.get;
         if (typeof get !== "function") return null;
         const prev = renderer.getRenderTarget(); renderer.setRenderTarget(pass.renderTarget); rc.get = (t, m) => get.call(rc, t, m, depth);
-        try { return renderer.compileAsync(pass._quadMesh, pass._quadMesh.camera); } finally { rc.get = get; renderer.setRenderTarget(prev); }
+        try { return trackBuild(renderer.compileAsync(pass._quadMesh, pass._quadMesh.camera)); } finally { rc.get = get; renderer.setRenderTarget(prev); }
       };
       const chain = (items, one) => items.reduce((p, x) => p.then(() => one(x)), Promise.resolve());
       // (a draw that is not ready is not visible, or the first render would build it; compileAsync only takes what is visible, so it is for the moment of the call)
-      const compileDraw = (e) => { const v = e.mesh.visible; e.mesh.visible = true; try { return renderer.compileAsync(e.mesh, camera, scene); } finally { e.mesh.visible = v; } };
+      const compileDraw = (e) => { if (disposed) return; const v = e.mesh.visible; e.mesh.visible = true; try { return trackBuild(renderer.compileAsync(e.mesh, camera, scene)); } finally { e.mesh.visible = v; } };
       const jobs = (ps, ms) => [...ps.map((x) => () => compilePass(x)), ...ms.map((e) => () => compileDraw(e))];
       const run = (items, n) => { const lanes = Array.from({ length: Math.min(n, items.length) }, () => []); items.forEach((it, i) => lanes[i % lanes.length].push(it)); return Promise.all(lanes.map((lane) => chain(lane, (f) => f()))); };
       // The near tier's dressed classes (a gentlewoman or gentleman within 4 m: a few at a time, and only some seconds in, as people come into the tier as they are baked) are compiled after this settles, in one chain,
@@ -534,18 +587,20 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       if (serial && typeof renderer._nodes?.getForRenderAsync === "function") {
         const nodes = renderer._nodes, own = Object.prototype.hasOwnProperty.call(nodes, "getForRenderAsync"), build = nodes.getForRenderAsync;
         let tail = Promise.resolve();
-        const queued = function (renderObject) { const p = tail.then(() => build.call(this, renderObject)); tail = p.then(() => {}, () => {}); return p; };
+        const queued = function (renderObject) { const p = tail.then(() => disposed ? undefined : build.call(this, renderObject)); tail = p.then(() => {}, () => {}); return p; };
         nodes.getForRenderAsync = queued;
         unlock = () => { if (nodes.getForRenderAsync === queued) { if (own) nodes.getForRenderAsync = build; else delete nodes.getForRenderAsync; } };
       }
       // (each material's other draws follow its first as it settles, not when every first has)
       const followers = new Map(); for (const e of others) { if (!followers.has(e.material)) followers.set(e.material, []); followers.get(e.material).push(e); }
       const withFollowers = (e) => () => Promise.resolve(compileDraw(e)).then(() => Promise.all((followers.get(e.material) ?? []).map(compileDraw)));
-      const rest = hair.ready.then(() => run([...passes.map((x) => () => compilePass(x)), ...firsts.map(withFollowers)], chains)).finally(unlock);
+      const cancel = () => { unlock(); allReady?.(); };
+      pendingCompiles.add(cancel);
+      const rest = hair.ready.then(() => run([...passes.map((x) => () => compilePass(x)), ...firsts.map(withFollowers)], chains)).finally(() => { unlock(); if (!later.meshes.length) pendingCompiles.delete(cancel); });
       let allReady = null;
       const deferred = new Promise((res) => { allReady = res; });
       if (later.meshes.length) {
-        const ready = () => { for (const e of later.meshes) { e.ready = true; e.mesh.visible = true; } allReady(); };
+        const ready = () => { pendingCompiles.delete(cancel); if (disposed) { allReady(); return; } for (const e of later.meshes) { e.ready = true; e.mesh.visible = true; } allReady(); };
         // (they start a few frames in, not while the page is loading: loading is for what the first sight needs)
         startLater = () => run(jobs(later.passes, later.meshes), 1).then(ready, ready);
       } else allReady();

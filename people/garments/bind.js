@@ -98,3 +98,6 @@ export function blendSkin(binding, skinIndex, skinWeight, K = 4) {
   }
   return { skinIndex: si, skinWeight: sw };
 }
+
+// Cached derived CPU data; existing populations retain their own references.
+export function clearBindingCaches() { GRIDS.clear(); }

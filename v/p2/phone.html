@@ -1,0 +1,51 @@
+<title>Photonic Crowd Test</title>
+<style>
+  /* One full-screen test scene: the 3D view fills the frame; a readout sits top-left, the controls bottom-left.
+     Deliberately single-look (a neutral studio grey under white text) so the numbers read the same in either theme. */
+  :root {
+    --ground: #5f6266;
+    --ink: #f3f4f5;
+    --shade: rgba(16, 18, 20, 0.62);
+    --chip: rgba(16, 18, 20, 0.55);
+    --chip-on: #2f7d5b;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--ink); overflow: hidden; font: 14px/1.4 var(--sans); }
+  canvas { display: block; }
+  #panel {
+    position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px));
+    display: grid; gap: 6px; pointer-events: none;
+  }
+  #howto { background: var(--shade); padding: 8px 10px; border-radius: 8px; max-width: 34rem; text-wrap: pretty; }
+  #hud {
+    background: var(--shade); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 12px/1.45 var(--mono); font-variant-numeric: tabular-nums; max-width: 46rem;
+  }
+  #nav {
+    position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  #nav a { text-decoration: none; }
+  #nav button, #nav a {
+    font: 13px var(--sans); color: var(--ink); background: var(--chip); border: 1px solid rgba(255,255,255,0.18);
+    padding: 8px 11px; border-radius: 999px; cursor: pointer;
+  }
+  #nav button.on, #nav a.on { background: var(--chip-on); border-color: transparent; }
+  #nav button:focus-visible, #nav a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+</style>
+<div id="panel">
+  <div id="howto"><b>Benchmarks:</b> set Auto-Lock to Never, tap <b>Run every benchmark</b>, and leave the phone on the table with the screen on for about 4 minutes. It reloads itself step by step through each setup: the real people first (the demo's plaza of 300, with and without outfits), then the stand-in crowd and near person. At the end, tap <b>Send results</b>.</div>
+  <div id="hud">loading…</div>
+</div>
+<div id="nav"></div>
+<script type="importmap">{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js"
+}}</script>
+<script type="module" src="./crowd.js"></script>

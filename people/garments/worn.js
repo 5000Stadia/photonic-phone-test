@@ -183,3 +183,6 @@ export function garmentsOf(outfit, look, id = "", age = 30) {
   if (P.hose) add(P.hose, { colour: lk.stockings ?? "#f1ecde" });
   return out;
 }
+
+// Cached derived CPU data; existing populations retain their own references.
+export function clearPaletteCaches() { palettes.clear(); }

@@ -1,0 +1,38 @@
+{
+"id": "updo",
+"name": "Updo",
+"licence": "CC BY",
+"author": "Elvaerwyn",
+"source": "http://www.makehumancommunity.org/node/2001",
+"rows": 1372,
+"vertices": 2763,
+"triangles": 2677,
+"body": 13380,
+"scale": [
+[
+5399,
+11998
+],
+[
+791,
+881
+],
+[
+962,
+5320
+]
+],
+"scaleBase": [
+1.48,
+2.3298,
+1.9221
+],
+"helperRefs": 4116,
+"scalpMeanDm": 0.101,
+"scalpInsidePct": 0.1,
+"atlas": {
+"size": 1024,
+"median": 0.458,
+"detail": 0.0213
+}
+}

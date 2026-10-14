@@ -589,6 +589,12 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   }
 
   return {
+    dispose() {
+      for (const rec of people.values()) { rec.doing = null; remove(rec.id); }
+      rooms.clear(); grid.clear(); cells.length = 0;
+      arrivals.length = planners.length = nb.length = nbAll.length = nbAllD2.length = 0;
+      listed = shown = null; queue = [];
+    },
     add, remove, goTo, face, tick, hit, state,
     dump() {
       for (const rec of people.values()) catchUp(rec);

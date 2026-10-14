@@ -8,6 +8,7 @@ import { BONES } from './bodies.js';
 import { farReducedPositions } from './garments/reduced.js';
 const HEAD = BONES.findIndex(b=>b[0]==='head');
 export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU, perRow, walkW, F, B, REST_W, quality = "phone" }) {
+  let disposed = false;
   const states={}, entries=[], entryMap=new Map();
   // One atlas for every style: program sharing cannot depend on a material per style.
   const canvas=document.createElement('canvas'); canvas.width=3072; canvas.height=2048;
@@ -15,10 +16,15 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
   atlas.flipY=false;
   const ready=Promise.all(HAIR_STYLES.map(async(id,i)=>{
     const texture=await new THREE.TextureLoader().loadAsync(new URL(`../spikes/mhhair/data/${id==='crop'?'':'v2/'}${id}.png`,import.meta.url).href);
-    const ctx=canvas.getContext('2d');
-    // Original UVs address bottom-up images; place a flipped tile in the shared atlas.
-    ctx.save();ctx.translate((i%3)*1024,Math.floor(i/3)*1024+1024);ctx.scale(1,-1);ctx.drawImage(texture.image,0,0,1024,1024);ctx.restore();texture.dispose();
-  })).then(()=>{atlas.needsUpdate=true;});
+    if (disposed) { texture.dispose(); return; }
+    try {
+      const ctx=canvas.getContext('2d');
+      // Original UVs address bottom-up images; place a flipped tile in the shared atlas.
+      ctx.save();ctx.translate((i%3)*1024,Math.floor(i/3)*1024+1024);ctx.scale(1,-1);ctx.drawImage(texture.image,0,0,1024,1024);ctx.restore();
+    } finally { texture.dispose(); }
+  })).then(()=>{if (!disposed) atlas.needsUpdate=true;});
+  // Loads already in flight cannot be aborted by TextureLoader. Late results are disposed above.
+  ready.catch(() => {});
   function state(tier) {
     if(states[tier])return states[tier];
     const cap=tiers[tier].cap, max=Math.max(...Object.values(HAIR.styles).map(s=>s.rt.length));
@@ -120,6 +126,15 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
   }
   return {
     ready, entries, attachFar, prepareFar,
+    dispose(){
+      if(disposed)return; disposed=true;
+      // Meshes and their shared materials are disposed by the parent draw.
+      atlas.dispose(); farTex.dispose();
+      for(const s of Object.values(states)) { s.tex.dispose(); s.data=null; }
+      for(const key of Object.keys(states))delete states[key];
+      entries.length=farEntries.length=0; entryMap.clear();
+      canvas.width=canvas.height=0;
+    },
     warm(){for(const tier of ['near','mid'])for(const id of HAIR_STYLES)entry(tier,id);},
     begin(){for(const s of Object.values(states))s.rows=0;for(const e of entries)e.mesh.count=0;},
     add(tier,rec,nearBody){

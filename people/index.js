@@ -4,23 +4,52 @@
 // honestly: sit/stand/use (M4) return false; perceives() is empty until M4's perception; say() keeps the speech
 // contract's timing and events now, and the face that speaks arrives with M5.
 
+import { clearOutfitCaches } from "./garments/outfit.js";
+import { clearReducedCaches } from "./garments/reduced.js";
+import { clearBindingCaches } from "./garments/bind.js";
+import { clearPaletteCaches } from "./garments/worn.js";
+
 import { makePopulation } from "./population.js";
 import { makeDraw } from "./draw.js";
 import { GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN } from "./garments/outfit.js";
 
+// /1 promises makePeople(THREE, {basis, quality, outfits, ...}); add/get/all/goTo;
+// person.wear(garments) and worn(); warm(); compile(renderer, scene, camera, opts);
+// tick(t, dt, camera); events(); dump(); dispose().
+export const PEOPLE_API = "photonic.people/1";
+
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
 export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality } = {}) {
-  const pop = makePopulation({ ctx, basis, thresholds, planBudget, ...(outfits !== undefined ? { outfits } : {}) });
-  const draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality });
+  let pop = makePopulation({ ctx, basis, thresholds, planBudget, ...(outfits !== undefined ? { outfits } : {}) });
+  let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
   let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
 
+  let disposed = false;
+  const commands = new Set();
+  // Drop the implementations as well as guarding them: retained person handles must
+  // not keep records, baked bodies or the draw's CPU arrays alive after disposal.
+  function guarded(object) {
+    for (const key of Reflect.ownKeys(object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(object, key);
+      if (typeof descriptor.value !== "function" && !descriptor.get) continue;
+      const command = { fn: descriptor.get ?? descriptor.value };
+      commands.add(command);
+      const call = (...args) => {
+        if (disposed) throw new Error("people: disposed; create a new population before use");
+        return command.fn(...args);
+      };
+      Object.defineProperty(object, key, descriptor.get ? { ...descriptor, get: call } : { ...descriptor, value: call });
+    }
+    return object;
+  }
+
   function handle(rec) {
     if (!rec) return null;
     const id = rec.id;
-    return {
+    return guarded({
       id, rank: rec.rank,
       get recipe() { return rec.res.recipe; },
       where: () => pop.where(id),
@@ -49,10 +78,10 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
       dressing: () => rec.attire,             // the report of the last wear (or of what the crowd's rule gave them): what is drawn and what is not
       bounds: () => ({ half: rec.half, height: rec.height, reach: 0.42 * rec.height }),
       state: () => pop.state(id),
-    };
+    });
   }
 
-  return {
+  const api = guarded({
     group: draw.group,
     /** Make the draws a renderer will need (the base class, and the placeholder rule's four outfits (gentlewoman, gentleman, workwoman, workman) unless `outfits` is false or a rule of your own, whose outfits `list` names) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
      *  behind a loading screen instead of at the first frame. Returns how many draws there are. Draws made later, for a class not warmed, still come when someone is first in it. */
@@ -75,6 +104,7 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
     },
     add: (doc) => handle(pop.add(doc)),
     remove(id) { const rec = pop.get(id); if (rec) draw.release(rec); speaking.delete(String(id)); return pop.remove(id); },
+    goTo: (id, target, opts) => pop.goTo(id, target, opts),
     get: (id) => handle(pop.get(id)),
     all: () => pop.all().map(handle),
     /** Deterministic continuity record: one line per id, with rounded spatial and colour values. */
@@ -84,5 +114,23 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
     presence: (id, mode) => pop.presence(id, mode),
     events() { const e = [...extra, ...pop.events()]; extra = []; return e; },
     stats: () => ({ ...counts, bytes: draw.bytes() }),
+  });
+  let disposal;
+  // Normally synchronous; await the result if renderer compilation is in flight.
+  api.dispose = () => {
+    if (disposed) return disposal;
+    disposed = true;
+    disposal = draw.dispose();
+    pop.dispose();
+    clearOutfitCaches();
+    clearReducedCaches();
+    clearBindingCaches();
+    clearPaletteCaches();
+    speaking.clear(); extra = [];
+    for (const command of commands) command.fn = null;
+    commands.clear();
+    draw = pop = null;
+    return disposal;
   };
+  return api;
 }

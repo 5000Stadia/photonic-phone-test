@@ -269,5 +269,9 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     return { position: p0, normal: normalize(nrm) };
   }
 
-  return { specTexture, writeSpecRow, specData, count, swayAmp, vertex, passes: bridge > 0 ? [pass1, pass2] : [pass1], RW, RH, PX, dispose() { pass1.dispose(); if (pass2 !== pass1) pass2.dispose(); specTexture.dispose(); } };
+  // QuadMesh otherwise borrows three's process-wide geometry. Own a copy so this
+  // layer can release its buffers without invalidating another renderer's passes.
+  const passes = bridge > 0 ? [pass1, pass2] : [pass1];
+  for (const pass of passes) pass._quadMesh.geometry = pass._quadMesh.geometry.clone();
+  return { specTexture, writeSpecRow, specData, count, swayAmp, vertex, passes, RW, RH, PX, dispose() { for (const pass of passes) { pass.autoUpdate = false; pass._quadMesh.geometry.dispose(); pass.dispose(); } specTexture.dispose(); } };
 }

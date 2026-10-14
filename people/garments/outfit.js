@@ -289,3 +289,6 @@ export function dress(near, params, outfit = GENTLEWOMAN, { exact = false } = {}
   return { cut, bodice, skirt, skirts, footprint: Math.max(...skirts.map(skirtFootprint)), layer: { s: layerCut(near.position, bodice, params.height, outfit.layer.margin), colour: outfit.layer.colour }, arms: cut.arms ?? null, keepout: keepOutFor(tubes ? skirts : skirt, near.joints.J, params.height, outfit) };
 }
 export { SKIRT_V, SKIRT_INDEX, RINGS, AROUND, CUTS };
+
+// Cached derived CPU data; existing populations retain their own references.
+export function clearOutfitCaches() { templates.clear(); built.clear(); }
