@@ -178,6 +178,10 @@ const rgbOf = (hex) => [1, 3, 5].map((i) => lin(parseInt(hex.slice(i, i + 2), 16
 const PROFILES = { near: { rings: RINGS, around: 40 }, reduced: { rings: RINGS, around: 24 }, far: { rings: RINGS, around: 24 } };
 const layouts = new Map();
 
+// the cut's mean body at the reduced mesh, made once (every layout of a base cut at mid and far reads it)
+const meanReducedBodies = new Map();
+const meanReduced = (base) => { let p = meanReducedBodies.get(base); if (!p) meanReducedBodies.set(base, p = build(MEAN_BODIES[base]).position); return p; };
+
 /** The static layout of an outfit's class mesh at a tier ("near", "reduced" for mid, "far"), as described at the top of this file. Cached by outfit, tier and skirt profile. */
 export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
   if (!PROFILES[tier]) throw new Error("outfitLayout: tier " + tier);
@@ -204,7 +208,7 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
     if (near) { for (let v = 0; v < bodyV; v++) if (paint[4 * v + 3] === 1) { paint.set(c, 4 * v); paint[4 * v + 3] = 5; } }
     else {
       // the cloth flag of the reduced mesh is the layer: the vertices above the cut line (the adult's reduced neckline plus the margin, on the mean reduced body) are bare skin
-      const mean = build(MEAN_BODIES[base]).position, nk = neckline({ template: tpl, position: tpl.pos }), m = outfit.layer.margin * MEAN_BODIES[base].height;
+      const mean = meanReduced(base), nk = neckline({ template: tpl, position: tpl.pos }), m = outfit.layer.margin * MEAN_BODIES[base].height;
       for (let v = 0; v < D; v++) {
         if (paint[4 * v + 3] !== 1) continue;
         // a vertex within 3.9 cm (of 1.62 m) below the line is bare too: the reduced mesh's triangles are 2 cm, a person's bodice may stand lower than the template's, and a white vertex just

@@ -16,7 +16,8 @@
 // "gentlewoman:3" (outfit id : bit 0 the bodice, bit 1 the skirt; the gentleman's: bit 0 the doublet with its band and shirt, bit 1 his breeches, both in the baked shell, no skirt rings). One instanced draw per (tier, class), each person in the one they belong to this frame, so what she wears is
 // state read every frame (wearMask in outfits.js): taking the bodice off moves her to another class's draw, with no rebake and no pop between tiers. A class is a vertex layout
 // (garments/reduced.js outfitLayout: the body, then the bodice, then the skirt's rings) with its own index buffer (the triangles of what is worn; at mid and far with the
-// body under the bodice cut out), built the first time someone is in it.
+// body under the bodice cut out), built the first time someone is in it. The dressed classes of a tier share ONE material, so one program: what differs between outfits is data, not code (a vertex's part
+// of the class mesh in skirtRC.w, one garment store a kind whose slot is as large as the largest outfit's bodice, the mesh's first row in the agent texture read per object), so a new outfit adds no program.
 //   - the bodice is baked once on the CPU into a slot of its own beside the body's (near: from the full body through the binding; mid: from the exact reduced body; far: from
 //     the reduced body the coefficients give, the same binding), so body and clothes cannot disagree;
 //   - the skirt is not baked: it follows the pose (garments/skirt-tsl.js), its rings computed on the GPU from the person's bones in the walk texture, their spec from a row;
@@ -31,6 +32,7 @@ import { half, bitsOf, packHalf } from "./half.js";
 import { wearMask } from "./outfits.js";
 import { UVN } from "../spikes/makehuman/index.js";
 import { outfitLayout, bakeNear, bakeReduced, farReducedPositions } from "./garments/reduced.js";
+import { OUTFITS } from "./garments/outfit.js";
 import { makeSkirtGPU, writeSpecRow, SPEC_TEXELS } from "./garments/skirt-tsl.js";
 
 const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
@@ -94,7 +96,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     };
     const write = (s, b) => {
       const d = st.data, pu = bitsOf(b.position), nu = bitsOf(b.normal), cu = b.cut ? bitsOf(b.cut) : null;
-      for (let v = 0, o = s * Vs * 8; v < Vs; v++, o += 8) {
+      for (let v = 0, o = s * Vs * 8, n = pu.length / 3; v < n; v++, o += 8) {
         const i = v * 3;
         d[o] = half(pu[i]); d[o + 1] = half(pu[i + 1]); d[o + 2] = half(pu[i + 2]); d[o + 3] = cu ? half(cu[v]) : 0;
         d[o + 4] = half(nu[i]); d[o + 5] = half(nu[i + 1]); d[o + 6] = half(nu[i + 2]);
@@ -120,8 +122,21 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const stores = { mid: restStore(V, Math.max(1, exactCapacity - nearCapacity), 16), near: restStore(NEAR.V, nearCapacity, 2) };
   // the baked bodices (a slot each, of the class's bodice vertices): the near one from the full body, the reduced one (mid and far) from the reduced body; the second also says what each was baked from
   const layouts = {}, gstores = {}, garmentFrom = new Map(), bakes = { garment: 0, body: 0 };
-  const layoutOf = (kind, outfit) => (layouts[kind + "|" + outfit.id] ??= outfitLayout(outfit, kind, kind === "far" ? FAR_SKIRT : kind === "reduced" ? MID_SKIRT : {}));
-  const garmentStore = (kind, outfit) => { kind = kind === "near" ? "near" : "reduced"; return (gstores[kind + "|" + outfit.id] ??= restStore(layoutOf(kind, outfit).bodiceV, kind === "near" ? nearCapacity : capacity, 4)); };
+  const layoutOf = (kind, outfit) => (layouts[kind + "|" + outfit.id] ??= (() => {
+    const L = outfitLayout(outfit, kind, kind === "far" ? FAR_SKIRT : kind === "reduced" ? MID_SKIRT : {});
+    if (L.bodyV !== (kind === "near" ? NEAR.V : V)) throw new Error(`people: ${outfit.id}'s ${kind} class mesh starts with ${L.bodyV} body vertices, not the tier's ${kind === "near" ? NEAR.V : V}`);     // (the shared programs take the body's end from the tier)
+    return L;
+  })());
+  // ONE garment store a kind (near, reduced), shared by every outfit: a slot is as many vertices as the largest outfit's bodice (the stride), so the shader reads a person's bodice at slot x stride whatever they wear,
+  // and a tier's dressed classes can share one program. The stride is the largest of the known outfits' (OUTFITS); another outfit with a larger bodice is refused.
+  const strides = {};
+  const strideOf = (kind) => strides[kind] ??= Math.max(...Object.values(OUTFITS).map((o) => layoutOf(kind, o).bodiceV));
+  const garmentStore = (kind, outfit) => {
+    kind = kind === "near" ? "near" : "reduced";
+    const st = (gstores[kind] ??= restStore(strideOf(kind), kind === "near" ? nearCapacity : capacity, 4));
+    if (outfit && layoutOf(kind, outfit).bodiceV > st.V) throw new Error(`people: outfit ${outfit.id}'s bodice has ${layoutOf(kind, outfit).bodiceV} vertices at ${kind}, over the garment store's slot of ${st.V} (add it to OUTFITS in garments/outfit.js)`);
+    return st;
+  };
 
   // ---- the draws: an entry a (tier, class) ----
   const tiers = { far: { cap: capacity }, mid: { cap: stores.mid.capMax }, near: { cap: nearCapacity } };
@@ -140,8 +155,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       const L = layoutOf(kind, outfit), body = tier === "far" ? TEMPLATE : null, n = L.V * 3, a = {};
       a.position = new Float32Array(n); a.normal = new Float32Array(n);
       if (body) { a.position.set(body.position); a.normal.set(body.normal); }         // near and mid read their rest shapes from slots: zeros stand in
-      a.skinIndex = L.skinIndex; a.skinWeight = L.skinWeight; a.paint = L.paint; a.skirtRC = L.skirtRC;
-      const o = Object.fromEntries(Object.entries(a).map(([k, arr]) => [k, new THREE.BufferAttribute(arr, k === "skinIndex" || k === "skinWeight" || k === "paint" ? 4 : k === "skirtRC" ? 3 : 3)]));
+      a.skinIndex = L.skinIndex; a.skinWeight = L.skinWeight; a.paint = L.paint;
+      // the skirt's ring, column and tube, and which part of the class mesh the vertex is in (0 the body, 1 the bodice, 2 the skirt): what the shader branches on, so it needs no outfit's vertex counts
+      a.skirtRC = new Float32Array(L.V * 4);
+      for (let v = 0; v < L.V; v++) { a.skirtRC.set(L.skirtRC.subarray(3 * v, 3 * v + 3), 4 * v); a.skirtRC[4 * v + 3] = v < L.bodyV ? 0 : v < L.bodyV + L.bodiceV ? 1 : 2; }
+      const o = Object.fromEntries(Object.entries(a).map(([k, arr]) => [k, new THREE.BufferAttribute(arr, k === "skinIndex" || k === "skinWeight" || k === "paint" || k === "skirtRC" ? 4 : 3)]));
       sharedAttrs.set(tier + "|" + outfit.id, o); return o;
     })() : (baseGeometry[tier] ??= (() => {
       const o = {};
@@ -187,6 +205,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return k;
   })();
 
+  const dressedMaterials = {};
   const entryFor = (tier, rec) => { const d = rec.dressing; return entryOf(tier, d?.outfit ?? null, d ? wearMask(d) : 0); };
   function entryOf(tier, outfit, mask) {
     const key = tier + "|" + (outfit ? `${outfit.id}:${mask}` : "base");
@@ -200,7 +219,10 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const cap = shared ? shared.cap : tiers[tier].cap, data = shared ? shared.data : new Float32Array(texels * cap * 4), tex = shared ? shared.tex : new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
     const g = geometryFor(tier, kind, outfit, mask);
     e = { key, tier, cap, data, tex, texels, coefBase, outfit, mask, kind, count: 0, shared, ready: true };
-    e.material = material(e);
+    // the dressed classes of a tier share one material, so one program (and one build of its nodes): what differs between them is data (the agent texture's rows, the garment store's slots, the mesh's first row)
+    e.material = outfit ? (dressedMaterials[tier] ??= material(e)) : material(e);
+    e.skirt = outfit && layoutOf(kind, outfit).skirtV > 0 && (mask & 2) ? shared.skirt : null;
+    if (outfit) garmentStore(kind, outfit);
     const mesh = new THREE.Mesh(g, e.material.m); mesh.count = 0; mesh.frustumCulled = false; mesh.name = `people-${tier}-${outfit ? outfit.id + ":" + mask : "base"}`;
     group.add(mesh); e.mesh = mesh;
     entries.set(key, e);
@@ -208,13 +230,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   }
 
   function material(e) {
-    const { tex: agentTex, tier, outfit, mask } = e, shape = tier === "far" ? "morph" : "exact", store = shape === "exact" ? stores[tier] : null;
+    // (a dressed class's material is the tier's: it reads nothing of this class but the tier's own agent texture, so e stands for them all)
+    const { tex: agentTex, tier, outfit } = e, shape = tier === "far" ? "morph" : "exact", store = shape === "exact" ? stores[tier] : null;
     const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75, side: tier === "near" ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside; the garments are shells
     if (outfit) m.side = THREE.DoubleSide;
-    const rowBase = outfit ? (e.rowBase = uniform(0, "int")) : null;           // a dressed class's first row in its tier's agent texture
+    // a dressed class's first row in its tier's agent texture: the mesh's own (write() sets userData.rowBase), read as the object is rendered, so the classes can share this material
+    const rowBase = outfit ? uniform(0, "int").onObjectUpdate(function ({ object }) { this.value = object.userData.rowBase ?? 0; }) : null;
     const i = rowBase ? int(instanceIndex).add(rowBase) : int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
     const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings, 7 the skirt's colour darkened (a knee band)
-    const L = outfit ? layoutOf(e.kind, outfit) : null;
+    const bodyEnd = tier === "near" ? NEAR.V : V;          // the class meshes' body is the tier's own mesh (outfitLayout checks it)
     const col = (k) => textureLoad(agentTex, ivec2(k, i)).rgb;
     if (!outfit) m.colorNode = varying(mix(mix(col(3), col(2), step(0.5, paint.w)), paint.rgb, step(1.5, paint.w)));
     else {
@@ -227,19 +251,18 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       m.colorNode = varying(mix(c, paint.rgb, own));
     }
     const walk = walkNode();
-    const gstore = outfit ? garmentStore(e.kind, outfit) : null;
-    const skirt = e.skirt = outfit && L.skirtV > 0 && (mask & 2) ? skirtOf(e.shared) : null;
+    const gstore = outfit ? garmentStore(e.kind) : null;
+    const skirt = outfit ? skirtOf(e.shared) : null;           // every dressed class's program has the skirt's branch; the classes without the skirt worn have no skirt vertices in their index
     // the layer's neck cut, near: the body slot's w at the layer's vertices; the fragment is discarded where it is above the shift's edge
     if (outfit && tier === "near") {
       const gi = int(textureLoad(agentTex, ivec2(1, i)).y).mul(store.V).add(int(vertexIndex)).mul(2), cutLoad = textureLoad(store.tex, ivec2(gi.mod(REST_W), gi.div(REST_W)));
       store.nodes.push(cutLoad);
-      m.maskNode = varying(select(int(vertexIndex).lessThan(L.bodyV), cutLoad.w, float(0))).lessThanEqual(0);
+      m.maskNode = varying(select(int(vertexIndex).lessThan(bodyEnd), cutLoad.w, float(0))).lessThanEqual(0);
     }
     m.positionNode = Fn(() => {
       const a0 = textureLoad(agentTex, ivec2(0, i)).toVar(), a1 = textureLoad(agentTex, ivec2(1, i)).toVar();
       const x0 = vec3(0).toVar(), n0 = vec3(0).toVar(), vi = int(vertexIndex);
       const p = vec3(0).toVar(), n = vec3(0).toVar();
-      const bodyEnd = L ? L.bodyV : 1e9, bodiceEnd = L ? L.bodyV + L.bodiceV : 1e9;
       const bodyPath = () => {
         if (shape === "exact") {
           const gi = int(a1.y).mul(store.V).add(vi).mul(2).toVar();
@@ -276,15 +299,14 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
           n.addAssign(n0.add(tn.mul(q.w)).add(cross(q.xyz, tn)).mul(w));
         }
       };
-      if (!L) { bodyPath(); skin(); }
+      if (!outfit) { bodyPath(); skin(); }
       else {
         // (the body and the bodice are skinned by the same bones: the skin is built once, after the shape is chosen)
-        If(vi.lessThan(bodiceEnd), () => { If(vi.lessThan(bodyEnd), () => { bodyPath(); }).Else(() => { bodicePath(); }); skin(); })
+        const rc = attribute("skirtRC", "vec4");          // ring, column, tube, and the vertex's part: 0 the body, 1 the bodice, 2 the skirt
+        If(rc.w.lessThan(1.5), () => { If(rc.w.lessThan(0.5), () => { bodyPath(); }).Else(() => { bodicePath(); }); skin(); })
           .Else(() => {
-            if (skirt) {
-              const rc = attribute("skirtRC", "vec3"), s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y), tube: int(rc.z) });
-              p.assign(s.position); n.assign(s.normal);
-            }
+            const s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y), tube: int(rc.z) });
+            p.assign(s.position); n.assign(s.normal);
           });
       }
       const ch = cos(a0.z), sh = sin(a0.z);
@@ -334,7 +356,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const name = e.tier, store = stores[name], outfit = e.outfit, texels = e.texels, sh = e.shared, tubes = outfit?.loose.tubes ?? 1;
     const rowBase = sh ? sh.rows : 0, D = e.data;           // a dressed class's people follow the tier's others in the one agent texture
     let n = 0;
-    if (sh) e.rowBase.value = rowBase;
+    if (sh) e.mesh.userData.rowBase = rowBase;
     for (const rec of list) {
       if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) break;
       if (!walkSlot(rec)) continue;
@@ -425,7 +447,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       return entries.size;
     },
     /** Compile everything warm() made on a renderer: each class's draw and each tier's skirt passes (which a scene's compileAsync does not reach: they render into targets, and would build at the first frame), in chains that overlap each other's waits. Settles when all have. Add `group` to the scene first; `scene` is the one it is rendered in (its lights). */
-    compile(renderer, scene, camera, { chains = typeof self !== "undefined" && typeof self.scheduler?.yield === "function" ? 3 : Infinity, defer = true } = {}) {
+    compile(renderer, scene, camera, { serial = typeof self !== "undefined" && typeof self.scheduler?.yield === "function", chains = serial ? Infinity : 3, defer = true } = {}) {
       // In chains, each its objects one after the other (compileAsync of a scene is one chain, and waits on each pipeline before building the next one's code): while one waits on the driver another builds code.
       // three yields to the page between the stages of building a draw's code with scheduler.yield() (a moment) where there is one, and else with requestAnimationFrame (a frame, 17 ms, which is a phone's
       // Safari: nine stages of waiting a draw, a second and a half for fifteen of them in one chain), so there every object is a chain of its own and their waits are the same frames.
@@ -452,7 +474,25 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       // and until they have, whoever would be in them is drawn as mid, which the tiers agree with to under 2 cm.
       for (const e of later.meshes) { e.ready = false; e.mesh.visible = false; }
       for (const sh of Object.values(dressedTiers)) for (const pass of sh.skirt?.passes ?? []) if (pass.quadReady) pass.textureNeedsUpdate = false;          // (a pass runs when there are skirts for it, not once at the first render)
-      const rest = run(jobs(passes, meshes.map((e) => e)), chains);
+      // Draws that share a material share a program, its nodes built once: of each material one draw is compiled with the passes (the lanes), and the rest, which find the build waiting, when it has settled. Built together
+      // they would each build it, since three keeps a build only once it has finished.
+      const seen = new Set(), firsts = [], others = [];
+      for (const e of meshes) (seen.has(e.material) ? others : firsts).push(e), seen.add(e.material);
+      // The builds of code are JavaScript on the page's one thread, and three runs those of compileAsync side by side, each yielding to the others, so all finish together at the end and the GPU's compiling of every
+      // pipeline starts then. Taken in turn (first come, first built) each build finishes in its time and its pipeline compiles while the next builds. Where the yields are the frames of a phone's Safari (`serial` false
+      // by default there) the waits are what the lanes overlap, and the builds stay side by side. (r186's getForRenderAsync; if it is not there, the builds stay side by side.)
+      let unlock = () => {};
+      if (serial && typeof renderer._nodes?.getForRenderAsync === "function") {
+        const nodes = renderer._nodes, own = Object.prototype.hasOwnProperty.call(nodes, "getForRenderAsync"), build = nodes.getForRenderAsync;
+        let tail = Promise.resolve();
+        const queued = function (renderObject) { const p = tail.then(() => build.call(this, renderObject)); tail = p.then(() => {}, () => {}); return p; };
+        nodes.getForRenderAsync = queued;
+        unlock = () => { if (nodes.getForRenderAsync === queued) { if (own) nodes.getForRenderAsync = build; else delete nodes.getForRenderAsync; } };
+      }
+      // (each material's other draws follow its first as it settles, not when every first has)
+      const followers = new Map(); for (const e of others) { if (!followers.has(e.material)) followers.set(e.material, []); followers.get(e.material).push(e); }
+      const withFollowers = (e) => () => Promise.resolve(compileDraw(e)).then(() => Promise.all((followers.get(e.material) ?? []).map(compileDraw)));
+      const rest = run([...passes.map((x) => () => compilePass(x)), ...firsts.map(withFollowers)], chains).finally(unlock);
       let allReady = null;
       const deferred = new Promise((res) => { allReady = res; });
       if (later.meshes.length) {
