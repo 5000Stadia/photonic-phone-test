@@ -308,10 +308,10 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         budgetLeft -= performance.now() - t;
       } else if (name === "mid") {
         ex = store.slot(rec, () => rec.body);
-        if (outfit) { const g = garmentStore("reduced", outfit), exact = garmentFrom.get(rec.id) === "exact"; gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "exact"); return bakeReduced(rec.body.position, rec.bodyParams, outfit).bodice; }, !exact && g.slots.has(rec.id)); }
+        if (outfit) { const g = garmentStore("reduced", outfit), exact = garmentFrom.get(rec.id) === "exact"; gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "exact"); return bakeReduced(rec.body.position, rec.bodyParams, outfit, rec.body.joints.J).bodice; }, !exact && g.slots.has(rec.id)); }
       } else if (outfit) {        // far: the bodice from the reduced body the person's coefficients give (the exact one if mid has baked it already)
         const g = garmentStore("reduced", outfit);
-        gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit).bodice; });
+        gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit, rec.far.J).bodice; });
       }
       const o = n * texels * 4;
       const D = e.data, pos = rec.pos;

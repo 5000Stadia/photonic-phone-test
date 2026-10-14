@@ -7,7 +7,7 @@
 // from their own landmarks, never the adult cut scaled down.
 import { buildNear } from "../shape.js";
 import { layerCut } from "./layer.js";
-import { bodiceTemplate, fit as fitBodyBinding, relax, normalsOf, bodyNormals, CUTS } from "./bodice.js";
+import { bodiceTemplate, fit as fitBodyBinding, relax, pinShoulders, normalsOf, bodyNormals, CUTS } from "./bodice.js";
 import { skirtSpec, skirtFootprint, SKIRT_V, SKIRT_INDEX, RINGS, AROUND } from "./skirt.js";
 import { skirtSpecAt } from "./tables.js";
 import { packed } from "./pack.js";
@@ -32,7 +32,7 @@ export const GENTLEWOMAN = {
     { id: "adult", ages: [13, Infinity], bodice: "adult", skirt: "gentlewoman", note: "the stays: rigid cone, flattened bust, long point; floor-length skirt over the bum roll" },
   ],
   pieces: [
-    { id: "bodice", kind: "shell", parts: ["torso", "sleeveL", "sleeveR"], bind: "mhclo", skin: "torso on chest, spine and hips as a rigid piece; sleeves on the upper arm blending to the chest at the shoulder", verts: "624 (480 torso as 12 rings of 40, 72 a sleeve), 1,120 triangles, at every cut; read as it stands at 1.5 m the facets do not show, so the near tier takes the same (the rings could go to 18 x 56 if a close still shows them)" },
+    { id: "bodice", kind: "shell", parts: ["torso", "sleeveL", "sleeveR"], bind: "mhclo", skin: "torso on chest, spine and hips as a rigid piece; sleeves on the upper arm blending to the chest at the shoulder", verts: "624 (480 torso as 12 rings of 40, 72 a sleeve), 1,140 triangles (the sleeves' tops closed by a fan), at every cut; read as it stands at 1.5 m the facets do not show, so the near tier takes the same (the rings could go to 18 x 56 if a close still shows them)" },
     { id: "skirt", kind: "loose", profile: "pose-following tube of 16 rings x 40 (640 vertices, 1,200 triangles)", verts: 640 },
   ],
   // the body each piece hides (MakeHuman's delete_verts), per body vertex; the base layer is never hidden
@@ -114,7 +114,7 @@ export function templateFor(cutId) {
  *  skirt: spec, footprint, layer: { s (the base layer's neck cut, layer.js), colour }, arms, keepout }. The bodice is fitted through the binding (about 0.1 ms); the skirt spec is read from the tables by the wearer's sliders and height. */
 export function dress(near, params, outfit = GENTLEWOMAN, { exact = false } = {}) {
   const cut = cutFor(params.age, outfit), tpl = templateFor(cut.bodice);
-  const position = relax(fitBodyBinding(tpl.binding, near.position, undefined, 1, 1, bodyNormals(near.position)), tpl);
+  const position = pinShoulders(relax(fitBodyBinding(tpl.binding, near.position, undefined, 1, 1, bodyNormals(near.position)), tpl), tpl, near.joints.J, params.height);
   const normal = normalsOf(position, tpl.index);
   const skirt = exact ? skirtSpec(near, cut.skirt) : skirtSpecAt(params, cut.skirt);      // the table's (a few microseconds, the same at every tier); `exact` reads the body (30 ms, the table's reference)
   const bodice = { template: tpl, position, normal, index: tpl.index, skinIndex: tpl.skin.skinIndex, skinWeight: tpl.skin.skinWeight, hides: tpl.hides, part: tpl.part };

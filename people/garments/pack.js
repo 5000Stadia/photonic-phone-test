@@ -29,7 +29,7 @@ export function packed(id, lazy = null) {
   const e = HEADER?.templates?.[id]; if (!e) return null;
   const a = arrays(e), cutName = e.cutName, full = id.startsWith("full:");
   const t = {
-    cut: CUTS[cutName], cutName, V: e.V, grids: e.grids, index: a.index, part: a.part, ring: a.ring, edge: a.edge, pos: a.pos, templateH: e.templateH, fromPack: true,
+    cut: CUTS[cutName], cutName, V: e.V, grids: e.grids, index: a.index, part: a.part, ring: a.ring, edge: a.edge, pos: a.pos, templateH: e.templateH, ref: e.ref, fromPack: true,
     binding: { n: e.V, ids: a.bindIds, w: a.bindW, off: a.bindOff, dist: a.bindDist, smooth: true },
     skin: { skinIndex: a.skinIndex, skinWeight: a.skinWeight },
   };
@@ -43,7 +43,7 @@ export function serialise(templates) {
   const header = { source: "tools/people/garment-pack.mjs", version: 1, templates: {} }, parts = []; let at = 0;
   const put = (arr, type) => { const pad = (4 - (at % 4)) % 4; if (pad) { parts.push(new Uint8Array(pad)); at += pad; } const off = at, bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength); parts.push(bytes); at += bytes.length; return [type, off, arr.length]; };
   for (const [id, t] of Object.entries(templates)) {
-    const e = { cutName: t.cutName, V: t.V, templateH: t.templateH, grids: t.grids, arrays: {} };
+    const e = { cutName: t.cutName, V: t.V, templateH: t.templateH, ref: t.ref, grids: t.grids, arrays: {} };
     e.arrays.index = put(Uint16Array.from(t.index), "u16"); e.arrays.part = put(Uint8Array.from(t.part), "u8"); e.arrays.ring = put(Uint8Array.from(t.ring), "u8"); e.arrays.edge = put(Uint8Array.from(t.edge), "u8");
     e.arrays.pos = put(Float32Array.from(t.pos), "f32");
     e.arrays.bindIds = put(Uint16Array.from(t.binding.ids), "u16"); e.arrays.bindW = put(Float32Array.from(t.binding.w), "f32"); e.arrays.bindOff = put(Float32Array.from(t.binding.off), "f32"); e.arrays.bindDist = put(Float32Array.from(t.binding.dist), "f32");

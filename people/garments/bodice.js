@@ -116,6 +116,9 @@ function generate(w, table, lm, cut) {
       const a = base + k * M + m, b = base + k * M + (m + 1) % M, c = base + (k + 1) * M + (m + 1) % M, d = base + (k + 1) * M + m;
       if (side < 0 && cut.rightSleeveOut) tri.push(a, c, b, a, d, c); else tri.push(a, b, c, a, c, d);
     }
+    // the sleeve's top is closed by a fan over its first ring (no new vertices): an open top shows the sleeve's inside through the shoulder, which the renderer lights as a dark patch
+    // (tools/people/garment-interior.mjs counts them), and on a broad shoulder it is a disc a centimetre or two across. The fan winds as the tube does, so its normal is the tube's outward.
+    for (let m = 1; m < M - 1; m++) { const a = base, b = base + m, c = base + m + 1; if (side < 0 && cut.rightSleeveOut) tri.push(a, b, c); else tri.push(a, c, b); }
   }
   return { grids, pos: Float32Array.from(pos), anchor: Float32Array.from(anchor), index: Uint16Array.from(tri), part: Uint8Array.from(part), ring: Uint8Array.from(ring), edge: Uint8Array.from(edgeRing) };
 }
@@ -266,7 +269,33 @@ export function bodiceTemplate(near, cutName = "adult") {
   // what the shell covers at the template, clear of its open edges by 35 mm (a vertex nearer a rim is the rim's question: it moves in and out of the edge with the body's build):
   // the sweep measures penetration over these, the body's and the base layer's, in each person's fitted garment (rest and poses)
   const covers = { body: hiddenBody(g, w, H, 0.06, 0.035).mask, layer: hiddenBody(g, w, H, 0.06, 0.035, NBODY, NFULL).mask };      // bit p set: part p covers it
-  return { cut, cutName, V: g.pos.length / 3, grids: g.grids, index: g.index, part: g.part, ring: g.ring, edge: g.edge, binding, skin, hides, covers, lm, pos: g.pos, templateH: H, templateWearer: w };
+  return { cut, cutName, V: g.pos.length / 3, grids: g.grids, index: g.index, part: g.part, ring: g.ring, edge: g.edge, binding, skin, hides, covers, lm, pos: g.pos, templateH: H, templateWearer: w, ref: shoulderRef(w, H) };
+}
+/** What pinShoulders needs of the template's own body: its height and the two shoulder joints (the upper arms'). */
+export const shoulderRef = (w, H) => ({ H, L: Array.from(w.J[BI.upperarmL]), R: Array.from(w.J[BI.upperarmR]) });
+
+/** The shoulder girdle is held to the skeleton, and the neckline is never lower than the skeleton says (R5 polish: the bodice's near-to-mid rim gap).
+ *  The binding carries a vertex by the triangle of body surface under it, which is right over a chest or a back but not at the shoulder: the straps of the neckline (the top two
+ *  rings, where they run over the shoulder) and the sleeve's cap (its first three rings) stand 3 to 5 cm off the surface or on its far side (the template's binding says -5 to +5 cm
+ *  there), so a body's shape and the mesh's resolution move them by centimetres, differently in the full body and in the reduced one. Those vertices are put where the shoulder
+ *  joint puts them: the template's offset from its own joint, scaled by the height. And the neckline's top two rings (front, back and sides) are raised to where the skeleton
+ *  puts them when the binding left them lower (a sagging chest's sternum), never lowered, so they never go into the body.
+ *  `J` the wearer's rest joints (any tier's: the full body's, the reduced body's or the far table's agree to millimetres), `height` the wearer's. Only + - * /. */
+export function pinShoulders(pos, template, J, height) {
+  const ref = template.ref; if (!ref) return pos;
+  const s = height / ref.H, T = template.pos, g = template.grids[0], top = g.start + (g.rings - 1) * g.around, Ju = J[BI.upperarmL], Jv = J[BI.upperarmR];
+  let rmax = 0; for (let j = 0; j < g.around; j++) { const x = Math.abs(T[3 * (top + j)]); if (x > rmax) rmax = x; }
+  const put = (v, Jp, Jt) => { for (let a = 0; a < 3; a++) pos[3 * v + a] = Jp[a] + (T[3 * v + a] - Jt[a]) * s; };
+  for (let k = g.rings - 2; k < g.rings; k++) for (let j = 0; j < g.around; j++) {
+    const v = g.start + k * g.around + j, ideal = Ju[1] + (T[3 * v + 1] - ref.L[1]) * s;
+    if (pos[3 * v + 1] < ideal) pos[3 * v + 1] = ideal;
+  }
+  for (let k = g.rings - 2; k < g.rings; k++) for (let j = 0; j < g.around; j++) {
+    const v = g.start + k * g.around + j, x = T[3 * v];
+    if (Math.abs(x) >= 0.5 * rmax) put(v, x > 0 ? Ju : Jv, x > 0 ? ref.L : ref.R);
+  }
+  for (const [part, Jp, Jt] of [[1, Ju, ref.L], [2, Jv, ref.R]]) { const q = template.grids[part]; for (let k = 0; k < 3; k++) for (let m = 0; m < q.around; m++) put(q.start + k * q.around + m, Jp, Jt); }
+  return pos;
 }
 /** The stays' straight front on a body of any shape: down each column of the torso's rings (the same angle round), the radius from the ring's centre is taken to the
  *  upper hull of its profile against height, as the template was cut (generate()), by the cut's own flattening and the front's weight. It bridges the creases
