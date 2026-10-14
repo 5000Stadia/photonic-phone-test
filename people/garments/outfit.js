@@ -19,7 +19,11 @@ export const MEAN_BODIES = {
   adult: { sex: 0.15, age: 30, build: 0.5, muscle: 0.5, height: 1.62, skin: "#c99a74" },
   girl: { sex: 0.15, age: 8, build: 0.5, muscle: 0.5, height: 1.28, skin: "#c99a74" },
   small: { sex: 0.15, age: 3, build: 0.5, muscle: 0.5, height: 0.96, skin: "#c99a74" },
+  man: { sex: 0.85, age: 30, build: 0.5, muscle: 0.5, height: 1.74, skin: "#c99a74" },
+  boy: { sex: 0.85, age: 9, build: 0.5, muscle: 0.5, height: 1.35, skin: "#c99a74" },
 };
+// the cut whose skin weights and topology every cut of an outfit shares (the class mesh's attributes are static): each outfit's first cut
+export const BASE_CUT = { adult: "adult", girl: "adult", small: "adult", man: "man", boy: "man" };
 
 export const GENTLEWOMAN = {
   id: "gentlewoman",
@@ -72,15 +76,76 @@ export const GENTLEWOMAN = {
   },
 };
 
+// "gentleman", London 1660: the very short doublet (V&A T.324-1980, 44 cm, six laps, the shirt showing at the waist gap) with its falling band, over petticoat breeches to the knee (V&A O356780)
+// and painted stockings. A boy takes it from his breeching (6 by default: the plan's call, unverified for London) to 13; under 6 a boy is in skirts, which is not this outfit.
+// The slots are the gentlewoman's: the shell piece is read as "bodice" (here the doublet, its band, its shirt and their sleeves) and the loose piece as "skirt" (the breeches), so one class
+// mesh, one bake and one pair of colour texels serve both.
+export const GENTLEMAN = {
+  id: "gentleman",
+  period: "London 1660 (V&A T.324-1980 doublet, O356780 petticoat breeches; r5-dress-1660.md, the gentleman)",
+  ages: { from: 6, to: Infinity, note: "men from 13 and breeched boys from 6; a boy under 6 is in skirts (breeching is 4 to 7, 6 by default), which is not this outfit and has none" },
+  cuts: [
+    { id: "boy", ages: [6, 13], bodice: "boy", skirt: "breeches", note: "a small man's doublet and breeches, cut from the boy's own landmarks (the shirt a little less full)" },
+    { id: "man", ages: [13, Infinity], bodice: "man", skirt: "breeches", note: "the very short doublet ending above the natural waist, the shirt blousing in the gap, the falling band; petticoat breeches to the knee" },
+  ],
+  // a baked shell (the doublet, the band, the shirt and its sleeves: wear bit 0) and a loose piece (the divided petticoat breeches: wear bit 1), which is two tubes of the skirt's ring machinery, one a leg
+  // (garments/skirt.js SKIRTS.breeches; garments/reduced.js outfitLayout puts both tubes in the class mesh)
+  slots: { shell: "bodice", loose: "skirt", tubes: 2 },
+  stuff: { 0: "doublet", 1: "doublet", 2: "doublet", 3: "linen", 4: "linen", 5: "linen", 6: "linen", 7: "linen", 8: "linen" },          // what each part of the shell is made of (the paint of its vertices)
+  pieces: [
+    { id: "doublet", kind: "shell", parts: ["torso", "sleeveL", "sleeveR"], bind: "mhclo", skin: "torso rigid on the chest, spine and hips; sleeves on the upper arm, the cap sewn to the chest", verts: "close-fitting, from a hem above the waist with six laps to the base of the neck; sleeves nearly to the elbow, fairly close" },
+    { id: "band", kind: "shell", parts: ["band"], bind: "mhclo", skin: "rigid with the doublet's top rings (the same weights, column for column)", verts: "4 rings lying on the doublet's top, bib-fronted and square over the shoulders, in linen" },
+    { id: "shirt", kind: "shell", parts: ["shirt", "shirtSleeveL", "shirtSleeveR", "shirtForearmL", "shirtForearmR"], bind: "mhclo", skin: "the trunk part rigid like the doublet; each sleeve in two pieces, the upper arm's and the forearm's, rigid on their bone", verts: "the shirt blousing in the narrow gap between breeches and doublet, and sleeves from under the doublet's sleeve to the wrist, billowing from the elbow, in a cuff: white linen (the shift's colour)" },
+    { id: "breeches", kind: "loose", profile: "two pose-following tubes of 16 rings, one on each leg, from the waist to a gathered knee band (a ribbon): the skirt's machinery with a path of its own for each leg (SKIRTS.breeches)", verts: "2 x 640 at near, 2 x 512 at mid, 2 x 384 at far" },
+    { id: "stockings", kind: "painted", note: "the legs' vertices below the hips take the stockings' colour (paint kind 6), and the feet the shoes' (kind 5): static attributes of the class mesh, a colour a person" },
+  ],
+  hides: { piece: "doublet", body: "template.hides.region (torso, and upper arms)", baseLayer: "kept (nobody is drawn unclothed)", legs: "kept: the breeches stop at the knee, and the stockings are the legs painted" },
+  loose: {
+    piece: "breeches", stateless: true, tubes: 2,
+    inputs: ["hips, spine, thighL/R, shinL/R bones (world rotation and joint position)", "floor height", "seat height (0 for none)", "gait phase", "sway amplitude"],
+    hem: "at the knees, a little below them: the knee band", footprint: "skirtFootprint(spec): the wider tube of the two",
+  },
+  hair: { fit: "over", neckline: "the falling band lies over the hair at the back; long hair falls over it", covered: ["hat"], hat: "not in this outfit (it needs the hair-under-hat family)", periwig: false },
+  // the base layer reads as the shirt: white linen, its collar cut just above the doublet's neck (the band stands over the cut), its arms and legs under the garments; below the knee it is the stockings
+  layer: { reads: "linen shirt and drawers under the breeches", colour: "#f3f0e8", neck: "doublet", margin: 0.012 },
+  // the painted pieces (garments/reduced.js outfitLayout): stockings on the vertices that are a leg's and shoes on the feet; and the ribbon at the
+  // breeches' knee band, in a colour of its own (the 1660 mark: r5-dress-1660.md)
+  painted: { stockings: {}, shoes: "#14100e", ribbon: "#a8262f", ribbonRings: 2 },
+  keepout: { volumes: ["breeches (two tubes)"], clearance: 0.008, note: "both tubes' rings at their design radii, as the skirt's; the doublet's torso is not asked, his arms hang beside it" },
+  // suits in the colours of the sources: black (the Dutch and English fashion colour), grey wool, a bottle green cloth coat, claret and blue (Pepys's coloured suits), a plum, and a gold-yellow silk (Lely's
+  // ladies' gold-yellow satin; a man's suit of it was court dress). Russet and tawny browns, the common English cloth colours, are out: every brown within reach of the skin tones of the ramp is within 22
+  // colour units of one of them (the V&A's beige doublet is no better), and each colour must stand off every skin tone by 22 (test/gentleman.test.mjs checks). The doublet and breeches are one suit; the shirt and
+  // band are the shift's white; the stockings are chosen apart.
+  palette: {
+    silks: [
+      { id: "black cloth", bodice: "#202027", skirt: "#1a1a20" },
+      { id: "plum", bodice: "#4f2c58", skirt: "#5c3666" },
+      { id: "grey wool", bodice: "#555963", skirt: "#656a75" },
+      { id: "bottle green", bodice: "#2b4a38", skirt: "#355b46" },
+      { id: "claret", bodice: "#6b1f2f", skirt: "#7d2a3c" },
+      { id: "slate blue", bodice: "#38507a", skirt: "#45618f" },
+      { id: "gold-yellow silk", bodice: "#b4952f", skirt: "#c2a24a" },
+    ],
+    stockings: [{ id: "cream", rgb: "#f1ecde" }, { id: "black", rgb: "#1c1c21" }, { id: "grey", rgb: "#8a8c94" }, { id: "blue-grey", rgb: "#4f6c8c" }],
+    shift: "#f3f0e8",
+  },
+};
+export const OUTFITS = { gentlewoman: GENTLEWOMAN, gentleman: GENTLEMAN };
+
 /** The colours of one wearer's outfit, from a number in [0, 1) the caller took from a hash (a garment choice is a hash, never a random stream): { id, bodice, sleeve,
  *  skirt, shift } as "#rrggbb". */
-export function look(u, outfit = GENTLEWOMAN) {
-  const silks = outfit.palette.silks, s = silks[Math.min(silks.length - 1, Math.floor(u * silks.length))];
-  return { id: s.id, bodice: s.bodice, sleeve: s.bodice, skirt: s.skirt, shift: outfit.palette.shift };
+export function look(u, outfit = GENTLEWOMAN, u2 = 0) {
+  const silks = outfit.palette.silks, s = silks[Math.min(silks.length - 1, Math.floor(u * silks.length))], hose = outfit.palette.stockings;
+  const o = { id: s.id, bodice: s.bodice, sleeve: s.bodice, skirt: s.skirt, shift: outfit.palette.shift };
+  if (hose) { const h = hose[Math.min(hose.length - 1, Math.floor(u2 * hose.length))]; o.stockings = h.rgb; o.stockingsId = h.id; }
+  return o;
 }
 
-/** The keep-out of a wearer's arms for this outfit (keepout.js): the skirt's swell and the legs inside it, from the wearer's skirt spec, their rest joints J (the walker's) and their height. */
-export function keepOutFor(spec, J, height) { return armKeepOut(J, height, (bones, ctx) => [skirtVolume(spec, bones, ctx), ...legVolumes(spec, bones)]); }
+/** The keep-out of a wearer's arms for this outfit (keepout.js): the skirt's swell and the legs inside it, from the wearer's skirt spec (an array of two, the tubes of the breeches), their rest joints J (the walker's) and their height. */
+export function keepOutFor(spec, J, height, outfit = GENTLEWOMAN) {
+  if (outfit.loose.tubes === 2) return armKeepOut(J, height, (bones, ctx) => spec.map((sp, i) => skirtVolume(sp, bones, ctx, i)), { clearance: outfit.keepout.clearance });          // the divided breeches: both tubes
+  return armKeepOut(J, height, (bones, ctx) => [skirtVolume(spec, bones, ctx), ...legVolumes(spec, bones)]);
+}
 
 /** The cut a wearer of this age takes. */
 export function cutFor(age, outfit = GENTLEWOMAN) {
@@ -96,9 +161,9 @@ export function buildTemplate(cutId) {
   if (built.has(cutId)) return built.get(cutId);
   const t = bodiceTemplate(buildNear(MEAN_BODIES[cutId]), cutId);
   built.set(cutId, t);
-  if (cutId !== "adult") {
-    const a = buildTemplate("adult");
-    if (a.V !== t.V || a.index.some((x, i) => x !== t.index[i]) || a.part.some((x, i) => x !== t.part[i])) throw new Error(`outfit: the ${cutId} bodice's topology is not the adult's`);
+  if (cutId !== BASE_CUT[cutId]) {
+    const a = buildTemplate(BASE_CUT[cutId]);
+    if (a.V !== t.V || a.index.some((x, i) => x !== t.index[i]) || a.part.some((x, i) => x !== t.part[i])) throw new Error(`outfit: the ${cutId} bodice's topology is not the ${BASE_CUT[cutId]}'s`);
     t.skin = a.skin;
   }
   return t;
@@ -116,8 +181,8 @@ export function dress(near, params, outfit = GENTLEWOMAN, { exact = false } = {}
   const cut = cutFor(params.age, outfit), tpl = templateFor(cut.bodice);
   const position = pinShoulders(relax(fitBodyBinding(tpl.binding, near.position, undefined, 1, 1, bodyNormals(near.position)), tpl), tpl, near.joints.J, params.height);
   const normal = normalsOf(position, tpl.index);
-  const skirt = exact ? skirtSpec(near, cut.skirt) : skirtSpecAt(params, cut.skirt);      // the table's (a few microseconds, the same at every tier); `exact` reads the body (30 ms, the table's reference)
+  const tubes = outfit.loose.tubes === 2, skirts = tubes ? [1, -1].map((leg) => skirtSpecAt(params, cut.skirt, leg)) : [exact ? skirtSpec(near, cut.skirt) : skirtSpecAt(params, cut.skirt)], skirt = skirts[0];      // the table's spec (a few microseconds, the same at every tier); `exact` reads the body (30 ms, the table's reference)      // the table's (a few microseconds, the same at every tier); `exact` reads the body (30 ms, the table's reference)
   const bodice = { template: tpl, position, normal, index: tpl.index, skinIndex: tpl.skin.skinIndex, skinWeight: tpl.skin.skinWeight, hides: tpl.hides, part: tpl.part };
-  return { cut, bodice, skirt, footprint: skirtFootprint(skirt), layer: { s: layerCut(near.position, bodice, params.height, outfit.layer.margin), colour: outfit.layer.colour }, arms: cut.arms ?? null, keepout: keepOutFor(skirt, near.joints.J, params.height) };
+  return { cut, bodice, skirt, skirts, footprint: Math.max(...skirts.map(skirtFootprint)), layer: { s: layerCut(near.position, bodice, params.height, outfit.layer.margin), colour: outfit.layer.colour }, arms: cut.arms ?? null, keepout: keepOutFor(tubes ? skirts : skirt, near.joints.J, params.height, outfit) };
 }
 export { SKIRT_V, SKIRT_INDEX, RINGS, AROUND, CUTS };

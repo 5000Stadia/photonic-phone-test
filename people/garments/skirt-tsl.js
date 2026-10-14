@@ -13,11 +13,13 @@
 //   16 (thigh[0], thigh[4], shin[0], shin[4])   leg radii at the ends of each segment      17 (foot, waistSpine, trainTuck, hemY)       18 (legClear, sway, bend, H)
 //   19 waistRest   20 hipsJoint   21 spineJoint   22 toeJoint L   23 toeJoint R   24 tipToe L   25 tipToe R     (vec3 each, rest pose)
 //   26 thigh L  27 thigh R  28 shin L  29 shin R  30 foot L  31 foot R                                          (rest joints of the bones the legs' capsules hang from)
+//   32 (short, kneeShare, drop, 0)    33 (lateral 0, lateral 1, 0, 0)      the divided breeches' tube (skirt.js SKIRTS.breeches): short 0 for a skirt, 1 for a tube on one leg, whose path ends at the knee;
+//                                     which leg is the person's row's parity in the passes (see `tubes` below), not a number here
 // Per-instance data, read from the agent texture (row = instance): texel 0 [x, z, heading, phase], texel 1 [walk slot, ., y, .], texel 4 [., ., ., spec row].
 // The bones are the walk texture's: per slot, columns F + 1 frames, rows 2 B (quaternion row, offset row per bone); a posed joint is P = R(q) j + u with j the rest joint.
 import { BONES } from "../../body.js";
 
-export const RINGS = 16, SPEC_TEXELS = 32;
+export const RINGS = 16, SPEC_TEXELS = 34;
 const BI = Object.fromEntries(BONES.map(([n], i) => [n, i]));
 const SEG_AT = [0, 4, 9, 14, 15], R_HIP = 4, R_KNEE = 9, R_ANKLE = 14, R_HEM = 15;
 const TAU = 2 * Math.PI;
@@ -31,6 +33,7 @@ export function writeSpecRow(data, row, spec, J) {
   put(18, spec.legClear, spec.sway, spec.bend, spec.H);
   put(19, ...spec.waistRest); put(20, ...spec.hipsJoint); put(21, ...spec.spineJoint); put(22, ...spec.toeJoint[0]); put(23, ...spec.toeJoint[1]); put(24, ...spec.tipToe[0]); put(25, ...spec.tipToe[1]);
   put(26, ...J[BI.thighL]); put(27, ...J[BI.thighR]); put(28, ...J[BI.shinL]); put(29, ...J[BI.shinR]); put(30, ...J[BI.footL]); put(31, ...J[BI.footR]);
+  put(32, spec.short ?? 0, spec.kneeShare ?? 0.5, spec.drop ?? 0); put(33, spec.lateral?.[0] ?? 0, spec.lateral?.[1] ?? 0, 0);
 }
 
 /**
@@ -41,18 +44,19 @@ export function writeSpecRow(data, row, spec, J) {
  * @param walk         { makeNode(), hU, perRow, F, W, B }: a function returning a node of the walk texture (draw.js keeps it pointed at the texture as it grows), a uniform node
  *                     of its height, people across a row, frames (32), width, bones (21)
  * @param bridge       the bridging gain (skirt.js BRIDGE_GAIN, 0.7), 0 for none (a far profile)
+ * @param tubes        1 for a skirt, 2 for the divided breeches: each instance is `tubes` tubes (its left and right leg's), the pass's person index being instance * tubes + leg, and its spec row too
  * @returns { specTexture, writeSpecRow, count, swayAmp, vertex({ instance, ring, col }) -> { position, normal }, passes, dispose() }
  *          `vertex` builds nodes and must be called inside a TSL Fn (the positionNode's): the person-local, unrotated position (y includes the floor clamp, not the root's y) and unit normal.
  */
-export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, walk, bridge = 0.7 }) {
+export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, walk, bridge = 0.7, tubes = 1 }) {
   const { Fn, If, select, mix, smoothstep, textureLoad, texture, ivec2, vec2, vec3, vec4, float, int, dot, cross, normalize, sqrt, min, max, abs, sign, clamp, sin, cos, uniform, rtt, uv, floor, mod } = tsl;
   const A = around;
-  const specData = new Float32Array(maxPeople * SPEC_TEXELS * 4);
-  const specTexture = new THREE.DataTexture(specData, SPEC_TEXELS, maxPeople, THREE.RGBAFormat, THREE.FloatType);
+  const rows = maxPeople * tubes, specData = new Float32Array(rows * SPEC_TEXELS * 4);
+  const specTexture = new THREE.DataTexture(specData, SPEC_TEXELS, rows, THREE.RGBAFormat, THREE.FloatType);
   specTexture.needsUpdate = true; specTexture.magFilter = specTexture.minFilter = THREE.NearestFilter; specTexture.generateMipmaps = false;
   const count = uniform(0), swayAmp = uniform(1);
   // the passes' render targets: a block of RINGS x A texels a person, PX blocks across a row
-  const PX = Math.max(1, Math.min(maxPeople, Math.floor(2048 / A))), RW = PX * A, RH = Math.ceil(maxPeople / PX) * RINGS;
+  const PX = Math.max(1, Math.min(rows, Math.floor(2048 / A))), RW = PX * A, RH = Math.ceil(rows / PX) * RINGS;
   const texelUV = (person, ring, col) => { const p = float(person), bx = p.mod(PX), by = floor(p.div(PX)); return vec2(bx.mul(A).add(float(col)).add(0.5).div(RW), by.mul(RINGS).add(float(ring)).add(0.5).div(RH)); };
   const pt = (x) => float(x);
   const smooth = (a, b, x) => smoothstep(float(a), float(b), x);
@@ -60,10 +64,10 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
   const v3 = (n) => vec3(n.x, n.y, n.z);
 
   // ---- a person's rig at a phase: bones, anchors, the path's segments (everything the ring frames stand on) ----
-  function makeRig(instance, phaseOverride) {
+  function makeRig(instance, leg = 0, phaseOverride) {
     const row = int(instance).toVar();
     const a0 = textureLoad(agent.tex, ivec2(0, row)), a1 = textureLoad(agent.tex, ivec2(1, row)), a4 = textureLoad(agent.tex, ivec2(4, row));
-    const phase = (phaseOverride ?? a0.w).toVar(), slot = a1.x.toVar(), srow = int(a4.w).toVar();
+    const phase = (phaseOverride ?? a0.w).toVar(), slot = a1.x.toVar(), srow = int(a4.w).mul(tubes).add(int(leg)).toVar();       // (a tube's spec row: the instance's rows are `tubes` in a row, its left leg's first)
     const S = (t) => textureLoad(specTexture, ivec2(t, srow));
     const wn = walk.makeNode();
     const uu = slot.mod(walk.perRow).mul(walk.F + 1).add(phase.mul(walk.F)).add(0.5).div(walk.W).toVar(), row0 = slot.div(walk.perRow).floor().mul(walk.B * 2).toVar();
@@ -80,21 +84,27 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
     const w0 = v3(S(19)), J0 = v3(S(20)), Js = v3(S(21));
     const a0v = mix(hips.P.add(rotate(hips.q, w0.sub(J0))), spine.P.add(rotate(spine.q, w0.sub(Js))), ws).toVar();
     const a1v = thL.P.add(thR.P).mul(0.5).toVar(), a2v = shL.P.add(shR.P).mul(0.5).toVar(), a3v = fL.P.add(fR.P).mul(0.5).toVar();
-    const a4v = vec3(a3v.x, min(a3v.y.sub(H.mul(0.01)), hemY), a3v.z).toVar();
-    const anc = [a0v, a1v, a2v, a3v, a4v];
+    // the path's end: the skirt's anchors are the knees, ankles and floor; a tube of the divided breeches (s32.x, 1) is on one leg (`leg`: 0 the left, 1 the right): its first two anchors are moved from the middle of the
+    // pelvis toward its hip joint by the cut's lateral shares, then a share of the way down its thigh, its knee, and a little below the knee along the thigh
+    const s32 = S(32), s33 = S(33), shrt = s32.x, legBit = float(leg), thO = mix(thL.P, thR.P, legBit).toVar(), kO = mix(shL.P, shR.P, legBit).toVar(), dl = thO.sub(a1v).toVar();
+    const td = kO.sub(thO).div(max(sqrt(dot(kO.sub(thO), kO.sub(thO))), 1e-9)).toVar();
+    const b0v = a0v.add(dl.mul(s33.x).mul(shrt)).toVar(), b1v = a1v.add(dl.mul(s33.y).mul(shrt)).toVar();
+    const b2v = mix(a2v, thO.add(kO.sub(thO).mul(s32.y)), shrt).toVar(), b3v = mix(a3v, kO, shrt).toVar();
+    const a4v = mix(vec3(a3v.x, min(a3v.y.sub(H.mul(0.01)), hemY), a3v.z), kO.add(td.mul(s32.z)), shrt).toVar();
+    const anc = [b0v, b1v, b2v, b3v, a4v];
     // heading and the pelvis axes
     const pf = rotate(hips.q, vec3(0, 0, 1)).toVar(), pd = rotate(hips.q, vec3(0, -1, 0)).toVar();
     const hl = max(sqrt(pf.x.mul(pf.x).add(pf.z.mul(pf.z))), 1e-6), hx = pf.x.div(hl).toVar(), hz = pf.z.div(hl).toVar();
     // the segments of the path
     const segD = [], segL = [], segS = [float(0)];
     for (let i = 0; i < 4; i++) { const d = anc[i + 1].sub(anc[i]), l = max(sqrt(dot(d, d)), 1e-9).toVar(); segD.push(d.div(l).toVar()); segL.push(l); segS.push(segS[i].add(l).toVar()); }
-    segD.push(vec3(0, -1, 0));
+    segD.push(mix(vec3(0, -1, 0), td, shrt));
     // the legs as capsules: a, b, ra, rb
     const tipL = v3(S(24)), tipR = v3(S(25)), jtL = v3(S(22)), jtR = v3(S(23));
     const caps = [
-      { a: thL.P, b: shL.P, ra: s16.x, rb: s16.y, leg: true }, { a: shL.P, b: fL.P, ra: s16.z, rb: s16.w, leg: true },
-      { a: thR.P, b: shR.P, ra: s16.x, rb: s16.y, leg: true }, { a: shR.P, b: fR.P, ra: s16.z, rb: s16.w, leg: true },
-      { a: fL.P, b: toeL.P.add(rotate(toeL.q, tipL.sub(jtL))), ra: s17.x, rb: s17.x.mul(0.8), leg: false }, { a: fR.P, b: toeR.P.add(rotate(toeR.q, tipR.sub(jtR))), ra: s17.x, rb: s17.x.mul(0.8), leg: false },
+      { a: thL.P, b: shL.P, ra: s16.x, rb: s16.y, leg: true, on: select(shrt.greaterThan(0.5), float(1).sub(legBit), float(1)) }, { a: shL.P, b: fL.P, ra: s16.z, rb: s16.w, leg: true, on: select(shrt.greaterThan(0.5), float(1).sub(legBit), float(1)) },
+      { a: thR.P, b: shR.P, ra: s16.x, rb: s16.y, leg: true, on: select(shrt.greaterThan(0.5), legBit, float(1)) }, { a: shR.P, b: fR.P, ra: s16.z, rb: s16.w, leg: true, on: select(shrt.greaterThan(0.5), legBit, float(1)) },
+      { a: fL.P, b: toeL.P.add(rotate(toeL.q, tipL.sub(jtL))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) }, { a: fR.P, b: toeR.P.add(rotate(toeR.q, tipR.sub(jtR))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) },
     ].map((c) => ({ ...c, a: c.a, b: c.b }));
     // how far the knees are bent (the train tucks in as they bend)
     let flex = float(0);
@@ -117,7 +127,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
         const hi = i < 4 ? segS[i + 1] : segS[4].add(10), ov = min(sk.add(bend), hi).sub(max(sk.sub(bend), segS[i]));
         nn.addAssign(segD[i].mul(max(ov, 0)));
       }
-      const g = smooth(R_KNEE, R_ANKLE, kf);
+      const g = smooth(R_KNEE, R_ANKLE, kf).mul(float(1).sub(shrt));          // (a tube of the breeches stays across its thigh)
       nn = vec3(nn.x.mul(float(1).sub(g)), lerp(nn.y, float(-1), g), nn.z.mul(float(1).sub(g)));
       const n = nn.div(max(sqrt(dot(nn, nn)), 1e-9)).toVar();
       // the ring's frame: the pelvis's forward carried by the shortest turn of its down axis onto the ring's normal
@@ -131,7 +141,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
       c = vec3(c.x.add(sa.mul(s1.mul(hx).mul(0.7).add(s2.mul(lat.x).mul(0.8)))), c.y, c.z.add(sa.mul(s1.mul(hz).mul(0.7).add(s2.mul(lat.z).mul(0.8)))));
       return { c: c.toVar(), n, f };
     }
-    return { row, phase, S, ring, caps, flex, clear, tuck, hemY, H, a0, a1, a4 };
+    return { row, phase, S, ring, caps, flex, clear, tuck, hemY, H, a0, a1, a4, shrt };
   }
 
   // ---- pass 1: the smoothed radius of (person, ring, column) ----
@@ -151,7 +161,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
       let wgt = float(1);
       if (cp.leg) { const d = cp.b.sub(cp.a), dl = max(sqrt(dot(d, d)), 1e-9); wgt = smooth(0.3, 0.6, abs(e).div(dl)); }
       const outside = da.greaterThan(rmax).and(db.greaterThan(rmax)).or(da.lessThan(rmax.negate()).and(db.lessThan(rmax.negate())));
-      const active = select(outside.or(wgt.lessThanEqual(0)), float(0), float(1)).toVar();
+      const active = select(outside.or(wgt.lessThanEqual(0)), float(0), float(1)).mul(cp.on).toVar();
       const flat = abs(e).lessThanEqual(1e-9), es = select(flat, float(1), e);
       const ta = rmax.negate().sub(da).div(es), tb = rmax.sub(da).div(es);
       const t0 = select(flat, float(0), max(float(0), min(ta, tb))).toVar(), t1 = select(flat, float(1), min(float(1), max(ta, tb))).toVar();
@@ -203,15 +213,15 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
   const opts = { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false };
   const pass1 = rtt(Fn(() => {
     const { person, ring: k, col } = decode(), out = vec4(0).toVar();
-    If(person.lessThan(int(count)), () => { const rig = makeRig(person); out.assign(vec4(radiusNode(rig, k, col), 0, 0, 1)); });
+    If(person.lessThan(int(count).mul(tubes)), () => { const rig = makeRig(person.div(tubes), person.mod(tubes)); out.assign(vec4(radiusNode(rig, k, col), 0, 0, 1)); });
     return out;
   })(), RW, RH, opts);
   pass1.name = "skirt pass 1";
   // (no bridging, no second pass: the far profile reads pass 1's radii)
   const pass2 = bridge <= 0 ? pass1 : rtt(Fn(() => {
     const { person, ring: k, col } = decode(), out = vec4(0).toVar();
-    If(person.lessThan(int(count)), () => {
-      const rig = makeRig(person), S1 = (kk) => pass1.sample(texelUV(person, kk, col)).level(0).x;
+    If(person.lessThan(int(count).mul(tubes)), () => {
+      const rig = makeRig(person.div(tubes), person.mod(tubes)), S1 = (kk) => pass1.sample(texelUV(person, kk, col)).level(0).x;
       const th = float(col).div(A).mul(TAU), sn = sin(th), cs = cos(th);
       const rk = rig.ring(k), s0 = S1(k);
       const dirOf = (fr) => cross(fr.f, fr.n).mul(sn).add(fr.f.mul(cs));
@@ -231,8 +241,8 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, maxPeople = 64, agent, w
   const R2 = (person, k, col) => pass2.sample(texelUV(person, k, col)).level(0).x;
 
   // ---- the vertex stage ----
-  function vertex({ instance, ring: k, col }) {
-    const rig = makeRig(instance), person = rig.row, kInt = int(k), cInt = int(col);
+  function vertex({ instance, ring: k, col, tube = 0 }) {
+    const rig = makeRig(instance, tube), person = int(instance).mul(tubes).add(int(tube)), kInt = int(k), cInt = int(col);
     const A_ = float(A), fr = (kk) => rig.ring(kk);
     const kU = max(kInt.sub(int(1)), int(0)), kD = min(kInt.add(int(1)), int(RINGS - 1));
     const f0 = fr(kInt), fU = fr(kU), fD = fr(kD);

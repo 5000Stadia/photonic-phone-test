@@ -6,7 +6,7 @@
 
 import { makePopulation } from "./population.js";
 import { makeDraw } from "./draw.js";
-import { GENTLEWOMAN } from "./garments/outfit.js";
+import { GENTLEWOMAN, GENTLEMAN } from "./garments/outfit.js";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
@@ -46,9 +46,9 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
 
   return {
     group: draw.group,
-    /** Make the draws a renderer will need (the base class, and the placeholder rule's gentlewoman unless `outfits` is false or a rule of your own) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
+    /** Make the draws a renderer will need (the base class, and the placeholder rule's gentlewoman and gentleman unless `outfits` is false or a rule of your own) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
      *  behind a loading screen instead of at the first frame. Returns how many draws there are. Draws made later, for a class not warmed, still come when someone is first in it. */
-    warm: () => draw.warm(outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN]),
+    warm: () => draw.warm(outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN, GENTLEMAN]),
     tick(t, dt, camera) {
       now = t;
       camera.updateMatrixWorld();

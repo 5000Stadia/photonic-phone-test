@@ -1,5 +1,5 @@
 // The garment templates, packed (R5; tools/people/garment-pack.mjs writes it): what a runtime needs of the six bodice templates (the full and the reduced cut of each of three
-// cuts), so no phone builds one at first sight (a template takes about 0.4 s to cut and bind). Data: spikes/makehuman/data/garments-gentlewoman.{json,bin.gz}.
+// cuts), so no phone builds one at first sight (a template takes about 0.4 s to cut and bind). Data: spikes/makehuman/data/garments-<outfit>.{json,bin.gz} (gentlewoman: six templates; gentleman: four).
 //   header.templates[id]  id "full:adult", "reduced:girl", ...: { cutName, V, templateH, count (full only: the body vertices hidden), grids, arrays: { name: [type, byteOffset, length] } }
 //   the blob              each array as written, 4-byte aligned: index u16, part u8, ring u8, edge u8, pos f32, bindIds u16, bindW f32, bindOff f32, bindDist f32, skinIndex u16, skinWeight f32,
 //                         region u8 (full only: the hides' region id of each drawn body vertex)
@@ -9,15 +9,17 @@
 import { gz, json } from "../../spikes/makehuman/load.js";
 import { CUTS, reducedHides } from "./bodice.js";
 
-const DATA = new URL("../../spikes/makehuman/data/", import.meta.url), NAME = "garments-gentlewoman";
+const DATA = new URL("../../spikes/makehuman/data/", import.meta.url), NAMES = ["garments-gentlewoman", "garments-gentleman"];
 const TYPES = { u8: Uint8Array, u16: Uint16Array, f32: Float32Array };
 
-let HEADER = null, BLOB = null;
-try { HEADER = await json(new URL(NAME + ".json", DATA)); BLOB = await gz(new URL(NAME + ".bin.gz", DATA)); } catch { HEADER = null; BLOB = null; }
-export const PACK = HEADER;
+// one pack a family of outfits (the template ids are unique across them: "full:adult", "full:man"...): the headers and blobs of those that exist
+const PACKS = [];
+for (const name of NAMES) { try { PACKS.push({ name, header: await json(new URL(name + ".json", DATA)), blob: await gz(new URL(name + ".bin.gz", DATA)) }); } catch { /* no pack: the callers build */ } }
+export const PACK = PACKS.find((p) => p.name === "garments-gentlewoman")?.header ?? null;
+export const PACK_OF = (name) => PACKS.find((p) => p.name === name)?.header ?? null;
 
 /** The arrays of a packed template as a flat object, or null. */
-function arrays(entry) {
+function arrays(entry, BLOB) {
   const o = {};
   for (const [name, [type, off, len]] of Object.entries(entry.arrays)) { const C = TYPES[type]; o[name] = new C(BLOB.slice(off, off + len * C.BYTES_PER_ELEMENT)); }
   return o;
@@ -26,8 +28,8 @@ function arrays(entry) {
 /** The packed template `id` ("full:adult", "reduced:small"...) as a template object (bodice.js bodiceTemplate's, or reduced.js's), or null without a pack. `lazy`: { covers, lm,
  *  templateWearer } are read from `lazy()` (the built template) the first time they are asked for. */
 export function packed(id, lazy = null) {
-  const e = HEADER?.templates?.[id]; if (!e) return null;
-  const a = arrays(e), cutName = e.cutName, full = id.startsWith("full:");
+  const pk = PACKS.find((p) => p.header.templates?.[id]), e = pk?.header.templates[id]; if (!e) return null;
+  const a = arrays(e, pk.blob), cutName = e.cutName, full = id.startsWith("full:");
   const t = {
     cut: CUTS[cutName], cutName, V: e.V, grids: e.grids, index: a.index, part: a.part, ring: a.ring, edge: a.edge, pos: a.pos, templateH: e.templateH, ref: e.ref, fromPack: true,
     binding: { n: e.V, ids: a.bindIds, w: a.bindW, off: a.bindOff, dist: a.bindDist, smooth: true },

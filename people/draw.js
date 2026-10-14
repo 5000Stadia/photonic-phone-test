@@ -13,7 +13,7 @@
 // their own walker baked into 32 frames (src/people/walk.js), at most `bakeBudgetMs` of baking a frame.
 //
 // CLASSES (R5, design/r5-plan.md "The wardrobe"): a class is an outfit and which of its garments are worn: "base" (the base layer only: everyone with no outfit) or
-// "gentlewoman:3" (outfit id : bit 0 the bodice, bit 1 the skirt). One instanced draw per (tier, class), each person in the one they belong to this frame, so what she wears is
+// "gentlewoman:3" (outfit id : bit 0 the bodice, bit 1 the skirt; the gentleman's: bit 0 the doublet with its band and shirt, bit 1 his breeches, both in the baked shell, no skirt rings). One instanced draw per (tier, class), each person in the one they belong to this frame, so what she wears is
 // state read every frame (wearMask in outfits.js): taking the bodice off moves her to another class's draw, with no rebake and no pop between tiers. A class is a vertex layout
 // (garments/reduced.js outfitLayout: the body, then the bodice, then the skirt's rings) with its own index buffer (the triangles of what is worn; at mid and far with the
 // body under the bodice cut out), built the first time someone is in it.
@@ -34,10 +34,10 @@ import { outfitLayout, bakeNear, bakeReduced, farReducedPositions } from "./garm
 import { makeSkirtGPU, writeSpecRow, SPEC_TEXELS } from "./garments/skirt-tsl.js";
 
 const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
-const TEXELS = 4, TEXELS_DRESSED = 6;      // an instance takes 4 agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one two more: [bodice rgb, spec row], [skirt rgb, bodice slot]
+const TEXELS = 4, TEXELS_DRESSED = 7;      // an instance takes 4 agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
 const MID_SKIRT = { rings: 16, around: 32 };    // mid's skirt: 32 columns (24 left up to 2.5 cm between it and near's 40 in a stride; 32 is within 1 cm: tools/people/switch-check.mjs)
 const FAR_SKIRT = { rings: 16, around: 24 };    // the far class's skirt: 24 columns, no bridging (16 columns left 3.1 to 3.6% of a dressed person's pixels differing from mid's at 4 to 10 m, over check.mjs's 3%: the hem and the silhouette)
-const DRESSED_FAR_CAP = 256;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures)
+const DRESSED_FAR_CAP = 256;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's, half as many: the same textures)
 
 export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4 } = {}) {
   // nobody is ever drawn unclothed: both topologies must carry the base layer's cloth flag
@@ -139,7 +139,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       a.position = new Float32Array(n); a.normal = new Float32Array(n);
       if (body) { a.position.set(body.position); a.normal.set(body.normal); }         // near and mid read their rest shapes from slots: zeros stand in
       a.skinIndex = L.skinIndex; a.skinWeight = L.skinWeight; a.paint = L.paint; a.skirtRC = L.skirtRC;
-      const o = Object.fromEntries(Object.entries(a).map(([k, arr]) => [k, new THREE.BufferAttribute(arr, k === "skinIndex" || k === "skinWeight" || k === "paint" ? 4 : k === "skirtRC" ? 2 : 3)]));
+      const o = Object.fromEntries(Object.entries(a).map(([k, arr]) => [k, new THREE.BufferAttribute(arr, k === "skinIndex" || k === "skinWeight" || k === "paint" ? 4 : k === "skirtRC" ? 3 : 3)]));
       sharedAttrs.set(tier + "|" + outfit.id, o); return o;
     })() : (baseGeometry[tier] ??= (() => {
       const o = {};
@@ -161,7 +161,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     // the far tier's 16 coefficients ride in the agent texture, four texels after the person's others, not as instanced vertex buffers: WebGPU allows 8 vertex buffers a pipeline (iPhone Safari and
     // Chromium alike) and the far class's attributes with four coefficient buffers were 9 (10 dressed)
     const kind = tier === "near" ? "near" : tier === "far" ? "far" : "reduced", coefBase = outfit ? TEXELS_DRESSED : TEXELS, texels = coefBase + (tier === "far" ? 4 : 0);
-    const cap = outfit && tier === "far" ? Math.min(capacity, DRESSED_FAR_CAP) : tiers[tier].cap, data = new Float32Array(texels * cap * 4), tex = new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
+    const tubes = outfit?.loose.tubes ?? 1, cap = Math.max(1, Math.floor((outfit && tier === "far" ? Math.min(capacity, DRESSED_FAR_CAP) : tiers[tier].cap) / tubes)), data = new Float32Array(texels * cap * 4), tex = new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
     const g = geometryFor(tier, kind, outfit, mask);
     e = { key, tier, cap, data, tex, texels, coefBase, outfit, mask, kind, count: 0 };
     e.material = material(e);
@@ -176,20 +176,21 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75, side: tier === "near" ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside; the garments are shells
     if (outfit) m.side = THREE.DoubleSide;
     const i = int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
-    const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour)
+    const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings
     const L = outfit ? layoutOf(e.kind, outfit) : null;
     const col = (k) => textureLoad(agentTex, ivec2(k, i)).rgb;
     if (!outfit) m.colorNode = varying(mix(mix(col(3), col(2), step(0.5, paint.w)), paint.rgb, step(1.5, paint.w)));
     else {
-      const k = paint.w, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k));
+      const k = paint.w, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k).mul(float(1).sub(step(5.5, k))));
       let c = mix(col(3), col(2), step(0.5, k).mul(float(1).sub(step(1.5, k))));                       // skin, or the tint (kind 1)
       c = mix(c, col(4), step(2.5, k).mul(float(1).sub(step(3.5, k))));                                 // the bodice
       c = mix(c, col(5), step(3.5, k).mul(float(1).sub(step(4.5, k))));                                 // the skirt
+      c = mix(c, col(6), step(5.5, k));                                                                 // the stockings
       m.colorNode = varying(mix(c, paint.rgb, own));
     }
     const walk = walkNode();
     const gstore = outfit ? garmentStore(e.kind, outfit) : null;
-    const skirt = outfit && (mask & 2) ? (e.skirt = makeSkirtGPU({ THREE, tsl: TSL, around: L.around, maxPeople: e.cap, agent: { tex: agentTex, texels: TEXELS_DRESSED }, bridge: tier === "far" ? 0 : undefined,
+    const skirt = outfit && L.skirtV > 0 && (mask & 2) ? (e.skirt = makeSkirtGPU({ THREE, tsl: TSL, around: L.around, maxPeople: e.cap, agent: { tex: agentTex, texels: TEXELS_DRESSED }, bridge: tier === "far" ? 0 : undefined, tubes: outfit.loose.tubes ?? 1,
       walk: { makeNode: () => walkNode(), hU: walkHU, perRow, F, W: walkW, B } })) : null;
     // the passes run on every render of the scene, not once per animation-loop tick (three's FRAME type): an app or a page may render more than once a tick and the skirts must follow
     if (skirt) for (const pass of skirt.passes) pass.updateBeforeType = TSL.NodeUpdateType.RENDER;
@@ -246,7 +247,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
           .ElseIf(vi.lessThan(bodiceEnd), () => { bodicePath(); skin(); })
           .Else(() => {
             if (skirt) {
-              const rc = attribute("skirtRC", "vec2"), s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y) });
+              const rc = attribute("skirtRC", "vec3"), s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y), tube: int(rc.z) });
               p.assign(s.position); n.assign(s.normal);
             }
           });
@@ -290,7 +291,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return b;
   };
   // her skirt's row: the numbers the passes read (fork B's writeSpecRow), kept with her
-  const specRow = (rec) => (rec.specRow ??= (() => { const r = new Float32Array(SPEC_TEXELS * 4); writeSpecRow(r, 0, rec.dressing.spec, rec.far.J); return r; })());
+  const specRow = (rec) => (rec.specRow ??= (() => { const specs = rec.dressing.specs, r = new Float32Array(specs.length * SPEC_TEXELS * 4); specs.forEach((sp, t) => writeSpecRow(r, t, sp, rec.far.J)); return r; })());
 
   // Writes one class's people; returns how many. A person new to the near tier needs their full body built (about 4 ms): when this
   // frame's budget is spent they are drawn as mid for now (`demoted`), and near from the next frame.
@@ -323,7 +324,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         const bo = rgb(rec, "bodice", rec.dressing.look.bodice), sk = rgb(rec, "skirt", rec.dressing.look.skirt);
         D[o + 16] = bo[0]; D[o + 17] = bo[1]; D[o + 18] = bo[2]; D[o + 19] = n;                  // the skirt's row is this instance's (fork B's passes write rows by instance)
         D[o + 20] = sk[0]; D[o + 21] = sk[1]; D[o + 22] = sk[2]; D[o + 23] = gslot;
-        if (e.skirt) e.skirt.specData.set(specRow(rec), n * SPEC_TEXELS * 4);
+        if (rec.dressing.look.stockings) { const st = rgb(rec, "stockings", rec.dressing.look.stockings); D[o + 24] = st[0]; D[o + 25] = st[1]; D[o + 26] = st[2]; }
+        if (e.skirt) e.skirt.specData.set(specRow(rec), n * (outfit.loose.tubes ?? 1) * SPEC_TEXELS * 4);
       }
       if (name === "far") {
         const far = rec.far, base = o + 4 * e.coefBase;
