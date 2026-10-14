@@ -1,0 +1,504 @@
+{
+"source": "MPFB2 game_engine rig + weights (CC0), see vendor/makehuman/NOTICE",
+"units": "decimetres (offsets)",
+"vertices": 14888,
+"body": 13380,
+"garment": [
+13524,
+1364
+],
+"bones": [
+"hips",
+"spine",
+"chest",
+"neck",
+"head",
+"clavL",
+"upperarmL",
+"forearmL",
+"handL",
+"clavR",
+"upperarmR",
+"forearmR",
+"handR",
+"thighL",
+"shinL",
+"footL",
+"toeL",
+"thighR",
+"shinR",
+"footR",
+"toeR"
+],
+"joints": [
+{
+"spread": 1.4172,
+"name": "hips",
+"kind": "head",
+"cube": "joint-pelvis",
+"mode": "slice",
+"n": 60,
+"centre": [
+0.0,
+0.7268,
+0.1445
+],
+"offset": [
+0.0,
+-0.0048,
+0.1766
+]
+},
+{
+"spread": 1.3698,
+"name": "spine",
+"kind": "head",
+"cube": "joint-spine-4",
+"mode": "slice",
+"n": 42,
+"centre": [
+0.0,
+1.1868,
+-0.0963
+],
+"offset": [
+0.0,
+0.0306,
+-0.2937
+]
+},
+{
+"spread": 1.0243,
+"name": "chest",
+"kind": "head",
+"cube": "joint-spine-2",
+"mode": "slice",
+"n": 42,
+"centre": [
+0.0,
+2.7966,
+0.2595
+],
+"offset": [
+0.0,
+0.0056,
+-0.2379
+]
+},
+{
+"spread": 0.5467,
+"name": "neck",
+"kind": "head",
+"cube": "joint-neck",
+"mode": "slice",
+"n": 59,
+"centre": [
+0.0,
+5.8902,
+0.068
+],
+"offset": [
+0.0,
+-0.0051,
+-0.2512
+]
+},
+{
+"spread": 0.7301,
+"name": "head",
+"kind": "head",
+"cube": "joint-head",
+"mode": "slice",
+"n": 96,
+"centre": [
+0.0,
+6.9749,
+0.1608
+],
+"offset": [
+0.0049,
+-0.0001,
+-0.757
+]
+},
+{
+"spread": 0.28,
+"name": "clavL",
+"kind": "head",
+"cube": "joint-l-clavicle",
+"mode": "ball",
+"n": 26,
+"centre": [
+0.2656,
+5.1913,
+0.6943
+],
+"offset": [
+0.0211,
+-0.1433,
+-0.1753
+]
+},
+{
+"spread": 0.5609,
+"name": "upperarmL",
+"kind": "head",
+"cube": "joint-l-shoulder",
+"mode": "ball",
+"n": 64,
+"centre": [
+1.6771,
+5.2458,
+0.146
+],
+"offset": [
+-0.144,
+-0.0023,
+-0.0387
+]
+},
+{
+"spread": 0.2869,
+"name": "forearmL",
+"kind": "head",
+"cube": "joint-l-elbow",
+"mode": "ball",
+"n": 44,
+"centre": [
+3.1294,
+3.4932,
+0.132
+],
+"offset": [
+-0.0104,
+0.0142,
+0.1246
+]
+},
+{
+"spread": 0.1516,
+"name": "handL",
+"kind": "head",
+"cube": "joint-l-hand",
+"mode": "ball",
+"n": 28,
+"centre": [
+4.3118,
+2.4518,
+1.7565
+],
+"offset": [
+-0.0645,
+-0.0482,
+-0.0116
+]
+},
+{
+"spread": 0.28,
+"name": "clavR",
+"kind": "head",
+"cube": "joint-r-clavicle",
+"mode": "ball",
+"n": 26,
+"centre": [
+-0.2656,
+5.1913,
+0.6943
+],
+"offset": [
+-0.0211,
+-0.1433,
+-0.1753
+]
+},
+{
+"spread": 0.5609,
+"name": "upperarmR",
+"kind": "head",
+"cube": "joint-r-shoulder",
+"mode": "ball",
+"n": 64,
+"centre": [
+-1.6771,
+5.2458,
+0.146
+],
+"offset": [
+0.144,
+-0.0023,
+-0.0387
+]
+},
+{
+"spread": 0.2869,
+"name": "forearmR",
+"kind": "head",
+"cube": "joint-r-elbow",
+"mode": "ball",
+"n": 44,
+"centre": [
+-3.1294,
+3.4932,
+0.132
+],
+"offset": [
+0.0104,
+0.0142,
+0.1246
+]
+},
+{
+"spread": 0.1516,
+"name": "handR",
+"kind": "head",
+"cube": "joint-r-hand",
+"mode": "ball",
+"n": 28,
+"centre": [
+-4.3118,
+2.4518,
+1.7565
+],
+"offset": [
+0.0645,
+-0.0482,
+-0.0116
+]
+},
+{
+"spread": 1.0493,
+"name": "thighL",
+"kind": "head",
+"cube": "joint-l-upper-leg",
+"mode": "slice",
+"n": 29,
+"centre": [
+1.1037,
+0.4861,
+0.123
+],
+"offset": [
+0.2277,
+-0.0045,
+0.3005
+]
+},
+{
+"spread": 0.5282,
+"name": "shinL",
+"kind": "head",
+"cube": "joint-l-knee",
+"mode": "ball",
+"n": 64,
+"centre": [
+1.5812,
+-3.6948,
+0.3202
+],
+"offset": [
+-0.0183,
+0.0169,
+-0.1219
+]
+},
+{
+"spread": 0.3575,
+"name": "footL",
+"kind": "head",
+"cube": "joint-l-ankle",
+"mode": "ball",
+"n": 42,
+"centre": [
+2.1962,
+-7.4478,
+-0.0091
+],
+"offset": [
+-0.0343,
+-0.04,
+0.0865
+]
+},
+{
+"spread": 0.1281,
+"name": "toeL",
+"kind": "head",
+"cube": "joint-l-foot-1",
+"mode": "ball",
+"n": 8,
+"centre": [
+2.1986,
+-8.1015,
+1.2085
+],
+"offset": [
+-0.0079,
+0.0385,
+-0.0191
+]
+},
+{
+"spread": 1.0493,
+"name": "thighR",
+"kind": "head",
+"cube": "joint-r-upper-leg",
+"mode": "slice",
+"n": 29,
+"centre": [
+-1.1037,
+0.4861,
+0.123
+],
+"offset": [
+-0.2277,
+-0.0045,
+0.3005
+]
+},
+{
+"spread": 0.5282,
+"name": "shinR",
+"kind": "head",
+"cube": "joint-r-knee",
+"mode": "ball",
+"n": 64,
+"centre": [
+-1.5812,
+-3.6948,
+0.3202
+],
+"offset": [
+0.0183,
+0.0169,
+-0.1219
+]
+},
+{
+"spread": 0.3575,
+"name": "footR",
+"kind": "head",
+"cube": "joint-r-ankle",
+"mode": "ball",
+"n": 42,
+"centre": [
+-2.1962,
+-7.4478,
+-0.0091
+],
+"offset": [
+0.0343,
+-0.04,
+0.0865
+]
+},
+{
+"spread": 0.1281,
+"name": "toeR",
+"kind": "head",
+"cube": "joint-r-foot-1",
+"mode": "ball",
+"n": 8,
+"centre": [
+-2.1986,
+-8.1015,
+1.2085
+],
+"offset": [
+0.0079,
+0.0385,
+-0.0191
+]
+},
+{
+"spread": 0.4397,
+"name": "head",
+"kind": "tip",
+"cube": "joint-head-2",
+"mode": "slice",
+"n": 25,
+"centre": [
+0.0,
+8.4044,
+0.0824
+],
+"offset": [
+0.0,
+0.0076,
+-0.5043
+]
+},
+{
+"spread": 0.0584,
+"name": "handL",
+"kind": "tip",
+"cube": "joint-l-finger-3-4",
+"mode": "ball",
+"n": 39,
+"centre": [
+4.7841,
+1.3028,
+3.0147
+],
+"offset": [
+-0.0124,
+-0.051,
+0.0202
+]
+},
+{
+"spread": 0.0584,
+"name": "handR",
+"kind": "tip",
+"cube": "joint-r-finger-3-4",
+"mode": "ball",
+"n": 39,
+"centre": [
+-4.7841,
+1.3028,
+3.0147
+],
+"offset": [
+0.0124,
+-0.051,
+0.0202
+]
+},
+{
+"spread": 0.0509,
+"name": "toeL",
+"kind": "tip",
+"cube": "joint-l-toe-2-4",
+"mode": "ball",
+"n": 31,
+"centre": [
+2.1639,
+-8.003,
+1.9166
+],
+"offset": [
+0.0066,
+-0.0027,
+0.0424
+]
+},
+{
+"spread": 0.0509,
+"name": "toeR",
+"kind": "tip",
+"cube": "joint-r-toe-2-4",
+"mode": "ball",
+"n": 31,
+"centre": [
+-2.1639,
+-8.003,
+1.9166
+],
+"offset": [
+-0.0066,
+-0.0027,
+0.0424
+]
+}
+],
+"influences": 4
+}

@@ -1,0 +1,38 @@
+{
+"id": "afro",
+"name": "Afro",
+"licence": "CC0",
+"author": "MakeHuman system assets",
+"source": "http://www.makehumancommunity.org",
+"rows": 2196,
+"vertices": 2276,
+"triangles": 2192,
+"body": 13380,
+"scale": [
+[
+5399,
+11998
+],
+[
+791,
+881
+],
+[
+962,
+5320
+]
+],
+"scaleBase": [
+1.48,
+2.3298,
+1.9221
+],
+"helperRefs": 0,
+"scalpMeanDm": 0.177,
+"scalpInsidePct": 0.4,
+"atlas": {
+"size": 1024,
+"median": 0.02,
+"detail": 0.0122
+}
+}

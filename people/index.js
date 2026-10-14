@@ -77,6 +77,8 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
     remove(id) { const rec = pop.get(id); if (rec) draw.release(rec); speaking.delete(String(id)); return pop.remove(id); },
     get: (id) => handle(pop.get(id)),
     all: () => pop.all().map(handle),
+    /** Deterministic continuity record: one line per id, with rounded spatial and colour values. */
+    dump: () => pop.dump(),
     hit(raycaster) { const o = raycaster.ray.origin, d = raycaster.ray.direction; return pop.hit([o.x, o.y, o.z], [d.x, d.y, d.z]); },
     show: (roomIds) => pop.show(roomIds),
     presence: (id, mode) => pop.presence(id, mode),

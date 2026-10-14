@@ -7,6 +7,7 @@
 
 import { parse } from "../traits/lexicon.js";
 import { hairFor } from "./hair.js";
+import { dumpPeople } from "./dump.js";
 import { resolve } from "../traits/resolve.js";
 import { uniform, seedOf } from "../traits/stream.js";
 import { paramsFor, build, buildNear, farBody } from "./bodies.js";
@@ -589,6 +590,10 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
 
   return {
     add, remove, goTo, face, tick, hit, state,
+    dump() {
+      for (const rec of people.values()) catchUp(rec);
+      return dumpPeople(people.values());
+    },
     get: (id) => people.get(String(id)) ?? null,
     where(id) { const rec = people.get(String(id)); if (!rec) return null; catchUp(rec); return { pos: rec.pos.slice(), floor: rec.floor, room: rec.room }; },
     all: () => [...people.values()],
