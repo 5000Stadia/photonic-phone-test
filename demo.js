@@ -54,7 +54,7 @@ function start() {
   });
   if (kind === "plaza") {                       // shared with the phone benchmark (plaza.js); its pipelines compile before the first frame
     loading = true;
-    plaza = makePlaza(THREE, { basis, compile: async (g) => { scene.add(g); await renderer.compileAsync(scene, camera); } }); people = plaza.people;
+    plaza = makePlaza(THREE, { basis, compile: async (g, people) => { await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); } }); people = plaza.people;
     plaza.ready.then(() => { loading = false; });
   }
 }

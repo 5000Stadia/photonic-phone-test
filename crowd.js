@@ -172,9 +172,10 @@ async function plazaRun() {
   say(`${label}: building 300 people…\n${caps}`);
   await new Promise(r => setTimeout(r, 50));                         // let the message paint before the main thread is busy
   const tSight = performance.now();
-  // the pipelines compile ahead, in the loading phase (people.warm and compileAsync, then one warm render that builds the skirt
-  // passes); "loading" is all of that, and first sight is the first frame after it, the one a player sees
-  const compile = async (g) => { scene.add(g); await renderer.compileAsync(scene, camera); };
+  // the pipelines compile ahead, in the loading phase (people.warm, then compileAsync beside people.compile, which also builds the
+  // skirt passes; nothing deferred, so no hitch after loading) and one warm render; "loading" is all of that, and first sight is
+  // the first frame after it, the one a player sees
+  const compile = async (g, people) => { await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); };
   const plaza = makePlaza(THREE, { basis, compile, ...(dressed ? {} : { outfits: false }) });
   await plaza.ready;
   let counts = plaza.tick(1 / 60, 1 / 60, camera);

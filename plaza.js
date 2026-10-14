@@ -20,11 +20,11 @@ export function makeStage(THREE) {
 
 /** The plaza's people: { people, tick(t, dt, camera) -> counts (also sends whoever arrived on to another spot), bumps() }.
  *  `outfits` as makePeople's (omitted: the placeholder rule; false: nobody dressed). `n`: how many (300).
- *  `compile(group)`: called with the people's group once their draws are made and before the 300 are built, to start compiling their pipelines in the renderer (it adds the group to its scene and
+ *  `compile(group, people)`: called with the people's group (and the people, for `people.compile(renderer, scene, camera)`, which compiles the draws concurrently and the skirt passes too) once their draws are made and before the 300 are built, to start compiling their pipelines in the renderer (it adds the group to its scene and
  *  awaits `renderer.compileAsync(scene, camera)`); the pipelines compile while the people are built, and `ready` settles when they have: await it before the first tick and render. */
 export function makePlaza(THREE, { basis, outfits, n = 300, compile, bakeBudgetMs } = {}) {
   const people = makePeople(THREE, { basis, thresholds: PLAZA_THRESHOLDS, ...(outfits !== undefined ? { outfits } : {}), ...(bakeBudgetMs !== undefined ? { bakeBudgetMs } : {}) });
-  const ready = compile ? (people.warm(), Promise.resolve(compile(people.group))) : Promise.resolve();
+  const ready = compile ? (people.warm(), Promise.resolve(compile(people.group, people))) : Promise.resolve();
   const trips = new Map();
   let bumps = 0;
   const elsewhere = (id) => { const k = (trips.get(id) ?? 0) + 1; trips.set(id, k); return [(uniform(1, id, "x" + k) - 0.5) * 30, 0, (uniform(1, id, "z" + k) - 0.5) * 30]; };

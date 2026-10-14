@@ -37,6 +37,7 @@ const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
 const TEXELS = 4, TEXELS_DRESSED = 7;      // an instance takes 4 agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
 const MID_SKIRT = { rings: 16, around: 32 };    // mid's skirt: 32 columns (24 left up to 2.5 cm between it and near's 40 in a stride; 32 is within 1 cm: tools/people/switch-check.mjs)
 const FAR_SKIRT = { rings: 16, around: 24 };    // the far class's skirt: 24 columns, no bridging (16 columns left 3.1 to 3.6% of a dressed person's pixels differing from mid's at 4 to 10 m, over check.mjs's 3%: the hem and the silhouette)
+const LATER_AFTER_UPDATES = 4;               // compile()'s deferred classes start compiling this many frames in
 const DRESSED_FAR_CAP = 256;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's, half as many: the same textures)
 
 export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4 } = {}) {
@@ -153,6 +154,38 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return g;
   }
 
+  // THE DRESSED TIERS: everyone dressed in a tier, in whatever outfit and whatever of it they wear, shares one agent texture (their classes lay their people one after another, a class's first row a
+  // uniform of its material) and one skirt system (the spec rows, the render-to-texture passes: a block each for a skirt, two for the breeches, packed from block 0). So the passes are made, compiled and run once a tier, not once a class:
+  // taking the bodice off, or another outfit, costs no new pass. The tier's room (rows, and blocks) is what a class of its own had before: the tier's capacity (the far tier's DRESSED_FAR_CAP), spent by whoever is first.
+  const dressedTiers = {};
+  function dressedTier(tier, around) {
+    let s = dressedTiers[tier];
+    if (!s) {
+      const cap = Math.max(1, tier === "far" ? Math.min(capacity, DRESSED_FAR_CAP) : tiers[tier].cap), texels = TEXELS_DRESSED + (tier === "far" ? 4 : 0), data = new Float32Array(texels * cap * 4);
+      s = dressedTiers[tier] = { tier, cap, texels, data, tex: new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType), around, skirt: null, rows: 0, blocks: 0 };
+    } else if (s.around !== around) throw new Error(`people: the ${tier} tier's outfits disagree on the skirt's columns (${s.around}, ${around})`);
+    return s;
+  }
+  const skirtOf = (s) => s.skirt ??= (() => {
+    const k = makeSkirtGPU({ THREE, tsl: TSL, around: s.around, blocks: s.cap, agent: { tex: s.tex }, bridge: s.tier === "far" ? 0 : undefined,
+      walk: { makeNode: () => walkNode(), hU: walkHU, perRow, F, W: walkW, B } });
+    // the passes run on every render of the scene, not once per animation-loop tick (three's FRAME type): an app or a page may render more than once a tick and the skirts must follow
+    for (const pass of k.passes) {
+      pass.updateBeforeType = TSL.NodeUpdateType.RENDER;
+      // RTTNode.setup sets its quad up (fragment, context) whenever a draw that samples the pass is built, and QuadMesh.render gives it its vertex node as it renders; the quad's cache key follows all three, so what compile()
+      // built for the quad would not be found at the first frame. Set the quad up once, here, as rendering finds it, and have setup leave it alone (three r186's private names; if they are not there, the pass is
+      // set up and built at the first render as it always was).
+      const quad = pass._quadMesh, textureSetup = Object.getPrototypeOf(Object.getPrototypeOf(pass)).setup;
+      if (!quad || typeof quad.render !== "function" || typeof textureSetup !== "function") continue;
+      let vertexNode = null; quad.render({ render: (q) => { vertexNode = q.material.vertexNode; } });          // (the stub is what QuadMesh.render renders with)
+      if (!vertexNode) continue;
+      const m = quad.material; m.contextNode = TSL.context({}); m.fragmentNode = pass.node; m.vertexNode = vertexNode; m.name = "RTT"; m.needsUpdate = true;
+      pass.setup = function (builder) { return textureSetup.call(this, builder); };
+      pass.quadReady = true;
+    }
+    return k;
+  })();
+
   const entryFor = (tier, rec) => { const d = rec.dressing; return entryOf(tier, d?.outfit ?? null, d ? wearMask(d) : 0); };
   function entryOf(tier, outfit, mask) {
     const key = tier + "|" + (outfit ? `${outfit.id}:${mask}` : "base");
@@ -161,9 +194,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     // the far tier's 16 coefficients ride in the agent texture, four texels after the person's others, not as instanced vertex buffers: WebGPU allows 8 vertex buffers a pipeline (iPhone Safari and
     // Chromium alike) and the far class's attributes with four coefficient buffers were 9 (10 dressed)
     const kind = tier === "near" ? "near" : tier === "far" ? "far" : "reduced", coefBase = outfit ? TEXELS_DRESSED : TEXELS, texels = coefBase + (tier === "far" ? 4 : 0);
-    const tubes = outfit?.loose.tubes ?? 1, cap = Math.max(1, Math.floor((outfit && tier === "far" ? Math.min(capacity, DRESSED_FAR_CAP) : tiers[tier].cap) / tubes)), data = new Float32Array(texels * cap * 4), tex = new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
+    // a dressed class takes its rows of its tier's one dressed agent texture (dressedTier), a plain one has a texture of its own
+    const shared = outfit ? dressedTier(tier, layoutOf(kind, outfit).around) : null;
+    const cap = shared ? shared.cap : tiers[tier].cap, data = shared ? shared.data : new Float32Array(texels * cap * 4), tex = shared ? shared.tex : new THREE.DataTexture(data, texels, cap, THREE.RGBAFormat, THREE.FloatType);
     const g = geometryFor(tier, kind, outfit, mask);
-    e = { key, tier, cap, data, tex, texels, coefBase, outfit, mask, kind, count: 0 };
+    e = { key, tier, cap, data, tex, texels, coefBase, outfit, mask, kind, count: 0, shared, ready: true };
     e.material = material(e);
     const mesh = new THREE.Mesh(g, e.material.m); mesh.count = 0; mesh.frustumCulled = false; mesh.name = `people-${tier}-${outfit ? outfit.id + ":" + mask : "base"}`;
     group.add(mesh); e.mesh = mesh;
@@ -175,7 +210,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const { tex: agentTex, tier, outfit, mask } = e, shape = tier === "far" ? "morph" : "exact", store = shape === "exact" ? stores[tier] : null;
     const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75, side: tier === "near" ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside; the garments are shells
     if (outfit) m.side = THREE.DoubleSide;
-    const i = int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
+    const rowBase = outfit ? (e.rowBase = uniform(0, "int")) : null;           // a dressed class's first row in its tier's agent texture
+    const i = rowBase ? int(instanceIndex).add(rowBase) : int(instanceIndex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
     const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings
     const L = outfit ? layoutOf(e.kind, outfit) : null;
     const col = (k) => textureLoad(agentTex, ivec2(k, i)).rgb;
@@ -190,10 +226,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     }
     const walk = walkNode();
     const gstore = outfit ? garmentStore(e.kind, outfit) : null;
-    const skirt = outfit && L.skirtV > 0 && (mask & 2) ? (e.skirt = makeSkirtGPU({ THREE, tsl: TSL, around: L.around, maxPeople: e.cap, agent: { tex: agentTex, texels: TEXELS_DRESSED }, bridge: tier === "far" ? 0 : undefined, tubes: outfit.loose.tubes ?? 1,
-      walk: { makeNode: () => walkNode(), hU: walkHU, perRow, F, W: walkW, B } })) : null;
-    // the passes run on every render of the scene, not once per animation-loop tick (three's FRAME type): an app or a page may render more than once a tick and the skirts must follow
-    if (skirt) for (const pass of skirt.passes) pass.updateBeforeType = TSL.NodeUpdateType.RENDER;
+    const skirt = e.skirt = outfit && L.skirtV > 0 && (mask & 2) ? skirtOf(e.shared) : null;
     // the layer's neck cut, near: the body slot's w at the layer's vertices; the fragment is discarded where it is above the shift's edge
     if (outfit && tier === "near") {
       const gi = int(textureLoad(agentTex, ivec2(1, i)).y).mul(store.V).add(int(vertexIndex)).mul(2), cutLoad = textureLoad(store.tex, ivec2(gi.mod(REST_W), gi.div(REST_W)));
@@ -243,8 +276,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       };
       if (!L) { bodyPath(); skin(); }
       else {
-        If(vi.lessThan(bodyEnd), () => { bodyPath(); skin(); })
-          .ElseIf(vi.lessThan(bodiceEnd), () => { bodicePath(); skin(); })
+        // (the body and the bodice are skinned by the same bones: the skin is built once, after the shape is chosen)
+        If(vi.lessThan(bodiceEnd), () => { If(vi.lessThan(bodyEnd), () => { bodyPath(); }).Else(() => { bodicePath(); }); skin(); })
           .Else(() => {
             if (skirt) {
               const rc = attribute("skirtRC", "vec3"), s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y), tube: int(rc.z) });
@@ -260,7 +293,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   }
 
   // A walk slot: the person's walker baked once. Returns false if over this frame's budget (drawn from next frame on).
-  let budgetLeft = 0;
+  let budgetLeft = 0, startLater = null, updates = 0;
   function walkSlot(rec) {
     if (rec.walkSlot !== undefined) return true;
     if (budgetLeft <= 0) return false;
@@ -291,15 +324,17 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return b;
   };
   // her skirt's row: the numbers the passes read (fork B's writeSpecRow), kept with her
-  const specRow = (rec) => (rec.specRow ??= (() => { const specs = rec.dressing.specs, r = new Float32Array(specs.length * SPEC_TEXELS * 4); specs.forEach((sp, t) => writeSpecRow(r, t, sp, rec.far.J)); return r; })());
+  const specRow = (rec) => (rec.specRow ??= (() => { const specs = rec.dressing.specs, r = new Float32Array(specs.length * SPEC_TEXELS * 4); specs.forEach((sp, t) => writeSpecRow(r, t, sp, rec.far.J, 0, t)); return r; })());
 
   // Writes one class's people; returns how many. A person new to the near tier needs their full body built (about 4 ms): when this
   // frame's budget is spent they are drawn as mid for now (`demoted`), and near from the next frame.
   function write(e, list, demoted) {
-    const name = e.tier, store = stores[name], outfit = e.outfit, texels = e.texels;
+    const name = e.tier, store = stores[name], outfit = e.outfit, texels = e.texels, sh = e.shared, tubes = outfit?.loose.tubes ?? 1;
+    const rowBase = sh ? sh.rows : 0, D = e.data;           // a dressed class's people follow the tier's others in the one agent texture
     let n = 0;
+    if (sh) e.rowBase.value = rowBase;
     for (const rec of list) {
-      if (n >= e.cap) break;
+      if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) break;
       if (!walkSlot(rec)) continue;
       let ex = 0, gslot = 0;
       if (name === "near") {
@@ -314,18 +349,23 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         const g = garmentStore("reduced", outfit);
         gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit, rec.far.J).bodice; });
       }
-      const o = n * texels * 4;
-      const D = e.data, pos = rec.pos;
+      const o = (rowBase + n) * texels * 4, pos = rec.pos;
       D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = rec.phase;
       D[o + 4] = rec.walkSlot; D[o + 5] = ex; D[o + 6] = pos[1];
       const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
       D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       if (outfit) {
         const bo = rgb(rec, "bodice", rec.dressing.look.bodice), sk = rgb(rec, "skirt", rec.dressing.look.skirt);
-        D[o + 16] = bo[0]; D[o + 17] = bo[1]; D[o + 18] = bo[2]; D[o + 19] = n;                  // the skirt's row is this instance's (fork B's passes write rows by instance)
+        D[o + 16] = bo[0]; D[o + 17] = bo[1]; D[o + 18] = bo[2]; D[o + 19] = sh.blocks;          // the person's first block of the tier's passes
         D[o + 20] = sk[0]; D[o + 21] = sk[1]; D[o + 22] = sk[2]; D[o + 23] = gslot;
         if (rec.dressing.look.stockings) { const st = rgb(rec, "stockings", rec.dressing.look.stockings); D[o + 24] = st[0]; D[o + 25] = st[1]; D[o + 26] = st[2]; }
-        if (e.skirt) e.skirt.specData.set(specRow(rec), n * (outfit.loose.tubes ?? 1) * SPEC_TEXELS * 4);
+        if (e.skirt) {
+          const sd = e.skirt.specData, row = specRow(rec), at = sh.blocks * SPEC_TEXELS * 4;
+          sd.set(row, at);
+          for (let t = 0; t < tubes; t++) sd[at + (t * SPEC_TEXELS + 33) * 4 + 2] = rowBase + n;          // (each block's leg is in the row; which person is theirs is this frame's)
+          sh.blocks += tubes;
+        }
+        sh.rows++;
       }
       if (name === "far") {
         const far = rec.far, base = o + 4 * e.coefBase;
@@ -337,8 +377,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return n;
   }
   const finish = (e, n) => {
-    e.mesh.count = n; e.count = n; e.tex.needsUpdate = true;
-    if (e.skirt) { e.skirt.count.value = n; e.skirt.specTexture.needsUpdate = true; }
+    e.mesh.count = n; e.count = n;
+    if (!e.shared) e.tex.needsUpdate = true;
   };
 
   return {
@@ -346,19 +386,33 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     /** Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
     update(sorted) {
       budgetLeft = bakeBudgetMs;
+      if (startLater && ++updates >= LATER_AFTER_UPDATES) { const go = startLater; startLater = null; go(); }
       const demoted = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
+      for (const sh of Object.values(dressedTiers)) { sh.rows = 0; sh.blocks = 0; }
       // near first (a person new to it may be demoted to mid this frame), then mid, then far; each class one draw
       const run = (tier, list) => {
         const byClass = new Map(); for (const rec of list) { const k = classKey(rec); let l = byClass.get(k); if (!l) byClass.set(k, l = []); l.push(rec); }
         const used = new Set();
-        for (const [, l] of byClass) { const e = entryFor(tier, l[0]); used.add(e); const n = write(e, l, tier === "near" ? demoted : []); finish(e, n); counts[tier] += n; }
+        for (const [, l] of byClass) {
+          const e = entryFor(tier, l[0]);
+          if (!e.ready) { for (const rec of l) demoted.push(rec); continue; }          // not compiled yet (compile() defers the near dressed classes): drawn as mid, as when the near body's budget is spent
+          used.add(e); const n = write(e, l, tier === "near" ? demoted : []); finish(e, n); counts[tier] += n;
+        }
         return used;
       };
       const t0 = performance.now(), usedNear = run("near", sorted.near), t1 = performance.now();
       const usedMid = run("mid", demoted.length ? demoted.concat(sorted.mid) : sorted.mid), t2 = performance.now(), usedFar = run("far", sorted.far), t3 = performance.now();
       counts.bakes = { ...bakes }; counts.ms = { near: t1 - t0, mid: t2 - t1, far: t3 - t2 };
       for (const e of entries.values()) if (e.count !== 0 && !usedNear.has(e) && !usedMid.has(e) && !usedFar.has(e)) finish(e, 0);          // a class nobody is in any more is emptied once, not uploaded every frame
-      for (const e of entries.values()) if (e.count > 0) { counts.classes++; if (e.skirt) counts.passes += e.skirt.passes.length; }
+      for (const e of entries.values()) if (e.count > 0) counts.classes++;
+      for (const sh of Object.values(dressedTiers)) {
+        if (sh.rows > 0) sh.tex.needsUpdate = true;
+        if (sh.skirt) {
+          sh.skirt.count.value = sh.blocks; if (sh.blocks > 0) sh.skirt.specTexture.needsUpdate = true;
+          for (const pass of sh.skirt.passes) pass.autoUpdate = sh.blocks > 0;          // (no skirts drawn, no passes run)
+          if (sh.blocks > 0) counts.passes += sh.skirt.passes.length;
+        }
+      }
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; }
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       return counts;
@@ -368,6 +422,45 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       for (const tier of ["near", "mid", "far"]) { entryOf(tier, null, 0); for (const o of outfitList) entryOf(tier, o, 3); }
       return entries.size;
     },
+    /** Compile everything warm() made on a renderer: each class's draw and each tier's skirt passes (which a scene's compileAsync does not reach: they render into targets, and would build at the first frame), in chains that overlap each other's waits. Settles when all have. Add `group` to the scene first; `scene` is the one it is rendered in (its lights). */
+    compile(renderer, scene, camera, { chains = typeof self !== "undefined" && typeof self.scheduler?.yield === "function" ? 3 : Infinity, defer = true } = {}) {
+      // In chains, each its objects one after the other (compileAsync of a scene is one chain, and waits on each pipeline before building the next one's code): while one waits on the driver another builds code.
+      // three yields to the page between the stages of building a draw's code with scheduler.yield() (a moment) where there is one, and else with requestAnimationFrame (a frame, 17 ms, which is a phone's
+      // Safari: nine stages of waiting a draw, a second and a half for fifteen of them in one chain), so there every object is a chain of its own and their waits are the same frames.
+      const passes = [], meshes = [], later = { passes: [], meshes: [] };
+      for (const e of entries.values()) (defer && e.tier === "near" && e.outfit ? later.meshes : meshes).push(e);
+      for (const sh of Object.values(dressedTiers)) {
+        const list = defer && sh.tier === "near" ? later.passes : passes;
+        for (const pass of sh.skirt?.passes ?? []) if (pass.quadReady) list.push({ pass, depth: pass === sh.skirt.passes[0] && sh.skirt.passes.length > 1 ? 2 : 1 });         // (pass 1 renders from inside pass 2's render, when there is one)
+      }
+      // A pass renders from inside the scene's render (RTTNode.updateBefore), so three gives it the render context of its call depth (RenderContexts.get): compile it as that, or its code and pipeline would be
+      // built again at the first frame (r186's private names again; if they are not there, the pass builds at the first render).
+      const compilePass = ({ pass, depth }) => {
+        const rc = renderer._renderContexts, get = rc?.get;
+        if (typeof get !== "function") return null;
+        const prev = renderer.getRenderTarget(); renderer.setRenderTarget(pass.renderTarget); rc.get = (t, m) => get.call(rc, t, m, depth);
+        try { return renderer.compileAsync(pass._quadMesh, pass._quadMesh.camera); } finally { rc.get = get; renderer.setRenderTarget(prev); }
+      };
+      const chain = (items, one) => items.reduce((p, x) => p.then(() => one(x)), Promise.resolve());
+      // (a draw that is not ready is not visible, or the first render would build it; compileAsync only takes what is visible, so it is for the moment of the call)
+      const compileDraw = (e) => { const v = e.mesh.visible; e.mesh.visible = true; try { return renderer.compileAsync(e.mesh, camera, scene); } finally { e.mesh.visible = v; } };
+      const jobs = (ps, ms) => [...ps.map((x) => () => compilePass(x)), ...ms.map((e) => () => compileDraw(e))];
+      const run = (items, n) => { const lanes = Array.from({ length: Math.min(n, items.length) }, () => []); items.forEach((it, i) => lanes[i % lanes.length].push(it)); return Promise.all(lanes.map((lane) => chain(lane, (f) => f()))); };
+      // The near tier's dressed classes (a gentlewoman or gentleman within 4 m: a few at a time, and only some seconds in, as people come into the tier as they are baked) are compiled after this settles, in one chain,
+      // and until they have, whoever would be in them is drawn as mid, which the tiers agree with to under 2 cm.
+      for (const e of later.meshes) { e.ready = false; e.mesh.visible = false; }
+      for (const sh of Object.values(dressedTiers)) for (const pass of sh.skirt?.passes ?? []) if (pass.quadReady) pass.textureNeedsUpdate = false;          // (a pass runs when there are skirts for it, not once at the first render)
+      const rest = run(jobs(passes, meshes.map((e) => e)), chains);
+      let allReady = null;
+      const deferred = new Promise((res) => { allReady = res; });
+      if (later.meshes.length) {
+        const ready = () => { for (const e of later.meshes) { e.ready = true; e.mesh.visible = true; } allReady(); };
+        // (they start a few frames in, not while the page is loading: loading is for what the first sight needs)
+        startLater = () => run(jobs(later.passes, later.meshes), 1).then(ready, ready);
+      } else allReady();
+      rest.deferred = deferred;          // settles when the deferred classes are compiled and in use (a test that needs every draw as it will be waits on it after a few updates)
+      return rest;
+    },
     /** Free a removed person's slots. */
     release(rec) {
       if (rec.walkSlot !== undefined) { freeWalk.push(rec.walkSlot); rec.walkSlot = undefined; }
@@ -376,6 +469,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     },
     // walk texture, the far basis (two half-float textures), the rest slots of both topologies and the baked bodices (half floats), the skirts' spec rows, their render-to-texture passes (RGBA32F, a texel per person, ring and column) and the agent textures
     bytes: () => walkData.byteLength + dd.length + [...Object.values(stores), ...Object.values(gstores)].reduce((n, st) => n + st.data.byteLength, 0)
-      + [...entries.values()].reduce((n, e) => n + e.data.byteLength + (e.skirt ? e.skirt.specData.byteLength + e.skirt.RW * e.skirt.RH * 16 * e.skirt.passes.length : 0), 0),
+      + [...entries.values()].reduce((n, e) => n + (e.shared ? 0 : e.data.byteLength), 0)
+      + Object.values(dressedTiers).reduce((n, sh) => n + sh.data.byteLength + (sh.skirt ? sh.skirt.specData.byteLength + sh.skirt.RW * sh.skirt.RH * 16 * sh.skirt.passes.length : 0), 0),
   };
 }
