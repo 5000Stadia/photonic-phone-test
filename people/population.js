@@ -36,7 +36,8 @@ class Person {
   get dressing() {
     if (this._dressing === undefined) {
       const outfits = this.env.outfits, o = outfits ? outfits(this.id, this.res.values) : null;
-      this._dressing = o ? dressingFor(this.id, o, this.bodyParams, this.far.J) : null;
+      // a rule answers an outfit, or { outfit, look } when it also chooses the colours (dress-words.js); the placeholder answers an outfit
+      this._dressing = o ? dressingFor(this.id, o.outfit ?? o, this.bodyParams, this.far.J, o.outfit ? o.look : undefined) : null;
       if (this._dressing) this.half = Math.max(this.half, this._dressing.footprint);
     }
     return this._dressing;
@@ -345,6 +346,7 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   function step(rec, dt, live = false) {
     const d = rec.doing;
     if (!d || d.verb !== "goTo" || d.planning) return;
+    if (d.opts?.inPlace) { rec.phase = (rec.phase + rec.rate * (d.opts.pace ?? 1) * dt) % 1; return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
     const pace = d.opts?.pace ?? 1, v = rec.speed * pace;
     let left = v * dt;
     let startLeft = left;

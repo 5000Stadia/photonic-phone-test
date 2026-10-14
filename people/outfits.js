@@ -25,10 +25,10 @@ export function outfitFor(id, values) {
 }
 
 /** What a dressed person carries: { outfit, cut, spec (their skirt's numbers from the tables; specs: one for each tube of the skirt, the gentleman's breeches two), look (their colours, from a hash), footprint (the radius their skirt asks of the floor), keepout
- *  (their arms' keep-out for their walk), wear (what is shown: the state a story changes, read each frame, never rebaked) }. `J`: their rig's rest joints (the walker's). */
-export function dressingFor(id, outfit, params, J) {
+ *  (their arms' keep-out for their walk), wear (what is shown: the state a story changes, read each frame, never rebaked) }. `colours`: colours chosen elsewhere (from their words, dress-words.js), laid over the hash's. `J`: their rig's rest joints (the walker's). */
+export function dressingFor(id, outfit, params, J, colours) {
   const cut = cutFor(params.age, outfit), tubes = outfit.loose.tubes ?? 1, specs = tubes === 2 ? [1, -1].map((leg) => skirtSpecAt(params, cut.skirt, leg)) : [skirtSpecAt(params, cut.skirt)];      // the gentleman's breeches are two tubes, one a leg
-  return { outfit, cut, spec: specs[0], specs, look: look(uniform(0, id, "silk"), outfit, uniform(0, id, "hose")), footprint: Math.max(...specs.map(skirtFootprint)), keepout: keepOutFor(tubes === 2 ? specs : specs[0], J, params.height, outfit), wear: { bodice: true, skirt: true } };
+  return { outfit, cut, spec: specs[0], specs, look: { ...look(uniform(0, id, "silk"), outfit, uniform(0, id, "hose")), ...colours }, footprint: Math.max(...specs.map(skirtFootprint)), keepout: keepOutFor(tubes === 2 ? specs : specs[0], J, params.height, outfit), wear: { bodice: true, skirt: true } };
 }
 
 /** The bits of what is worn, as draw.js's class key reads them: bit 0 the bodice (the gentleman's doublet, band and shirt), bit 1 the skirt (his breeches). */
