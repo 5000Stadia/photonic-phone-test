@@ -6,6 +6,7 @@
 // The fit is MakeHuman's: a hair vertex = w1 p[i1] + w2 p[i2] + w3 p[i3] + offset x scale, where p are the person's own vertices (the body
 // from the built person, the 428 helper-hair vertices re-deformed here from the same macro targets spikes/makehuman uses) and the scale per
 // axis is a pair of body vertices' distance on this person over the same distance on the neutral base (checked on the base: it lands on the scalp).
+import { gz, json } from "../makehuman/load.js";
 import { bake, weights } from "../makehuman/index.js";
 import { hairMaterials } from "./material.js";
 import { hairMaterials2 } from "./material2.js";
@@ -13,11 +14,11 @@ import { flowTangents, strays as makeStrays } from "./flow2.js";
 
 const KEEP_OUT = 0.0025;
 const DATA = new URL("./data/", import.meta.url);
-const gunzip = async (name) => new Response((await fetch(new URL(name, DATA))).body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+const gunzip = (name) => gz(new URL(name, DATA));
 let helper = null;
 async function loadHelper() {
   if (helper) return helper;
-  const meta = await (await fetch(new URL("helper.json", DATA))).json(), buf = await gunzip("helper.bin.gz");
+  const meta = await json(new URL("helper.json", DATA)), buf = await gunzip("helper.bin.gz");
   const n = meta.count, base = new Float32Array(buf.slice(0, n * 12)), deltas = {};
   meta.targets.forEach((name, k) => { deltas[name] = new Int16Array(buf.slice(n * 12 + k * n * 6, n * 12 + (k + 1) * n * 6)); });
   return (helper = { ...meta, base, deltas });
@@ -30,7 +31,7 @@ export async function loadStyles(THREE, ids, version = 1) {
   const out = {};
   await Promise.all(ids.map(async (id) => {
     const dir = version === 2 ? "v2/" : "";
-    const meta = await (await fetch(new URL(`${dir}${id}.json`, DATA))).json(), buf = await gunzip(`${dir}${id}.bin.gz`);
+    const meta = await json(new URL(`${dir}${id}.json`, DATA)), buf = await gunzip(`${dir}${id}.bin.gz`);
     const R = meta.rows, V = meta.vertices, Tn = meta.triangles;
     let o = 0;
     const take = (Cls, n) => { const a = new Cls(buf.slice(o, o + n * Cls.BYTES_PER_ELEMENT)); o += n * Cls.BYTES_PER_ELEMENT; return a; };
@@ -57,8 +58,8 @@ function personPoints(person, r, BODY) {
   return { Pm, s };
 }
 
-export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey = 0, strand = "v", tune = {} } = {}) {
-  const t0 = performance.now(), m = style.meta, BODY = m.body, { Pm, s } = personPoints(person, r, BODY);
+export function fitArrays(style, person, r, { strand = "v", tune = {} } = {}) {
+  const m = style.meta, BODY = m.body, { Pm, s } = personPoints(person, r, BODY);
   const ratio = [0, 1, 2].map((ax) => { const [a, b] = m.scale[ax]; return Math.abs(Pm[a * 3 + ax] - Pm[b * 3 + ax]) / s / m.scaleBase[ax]; });
   const rows = new Float32Array(m.rows * 3);
   for (let i = 0; i < m.rows; i++) for (let ax = 0; ax < 3; ax++) {
@@ -148,6 +149,12 @@ export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey 
       IDX = cat(style.tris, st.index.map((x) => x + nv), Uint16Array);
     }
   }
+  return { position: P, normal: Nn, tangent: Tg, uv: UVs, rt: RT, index: IDX, hl: HL, sp: SP, ratio, lifted };
+}
+
+export function wear(THREE, renderer, style, person, r, { tip = "#5a3d26", grey = 0, strand = "v", tune = {} } = {}) {
+  const t0 = performance.now(), m = style.meta, v2 = style.version === 2;
+  const { position: P, normal: Nn, tangent: Tg, uv: UVs, rt: RT, index: IDX, hl: HL, sp: SP, ratio, lifted } = fitArrays(style, person, r, { strand, tune });
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("tangent", new THREE.BufferAttribute(Tg, 4));
   geo.setAttribute("position", new THREE.BufferAttribute(P, 3)); geo.setAttribute("normal", new THREE.BufferAttribute(Nn, 3));

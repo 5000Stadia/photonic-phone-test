@@ -5,6 +5,8 @@
 // Engine principles (holo-emitter): rank from a hash of the id, compared once against thresholds everywhere; every
 // look from a hash, never a random stream in build order; phase advances in seconds.
 
+import { parse } from "../traits/lexicon.js";
+import { hairFor } from "./hair.js";
 import { resolve } from "../traits/resolve.js";
 import { uniform, seedOf } from "../traits/stream.js";
 import { paramsFor, build, buildNear, farBody } from "./bodies.js";
@@ -29,6 +31,8 @@ class Person {
     this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined; this.bumped = undefined;
     this.offRoute = undefined; this.lastGood = undefined; this.replan = undefined;
     this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this._cstockings = undefined; this._cbare = undefined; this.nearGarment = undefined; this.specRow = undefined;
+    this.hair = hairFor(this.values, this.seed, this.res.derived, Object.fromEntries((typeof this.res.recipe.said === "string" ? parse(this.res.recipe.said).constraints : this.res.recipe.said.constraints ?? []).map(c => [c.trait,true])));
+    this._hairBody = null;
     this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._attire = null; this._whole = null; this._garments = undefined; this._prefer = null; this._speed = undefined; this._rate = undefined;
   }
   get bodyParams() { return (this._params ??= paramsFor(this.res.values, this.res.derived)); }

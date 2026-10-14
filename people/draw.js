@@ -24,6 +24,8 @@
 //   - near: the base layer's neck is cut by a per-vertex number in the body's slot (texel w), which the fragment shader discards on (layers: layer.js).
 //   - her skirt's footprint is in the population's stepping-aside radius (rec.half), not here.
 
+import { makeHairDraw } from "./hair-draw.js";
+import { hairRegion } from "./hair.js";
 import { Fn, If, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, vec4, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross, mix, step, select } from "three/tsl";
 import * as TSL from "three/tsl";
 import { TEMPLATE, NEAR, B, morphBasis } from "./bodies.js";
@@ -36,7 +38,7 @@ import { OUTFITS } from "./garments/outfit.js";
 import { makeSkirtGPU, writeSpecRow, SPEC_TEXELS } from "./garments/skirt-tsl.js";
 
 const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
-const TEXELS = 4, TEXELS_DRESSED = 7;      // an instance takes 4 agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
+const TEXELS = 5, TEXELS_DRESSED = 8;      // plus a final hair RGB/enabled texel; the original four agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
 const MID_SKIRT = { rings: 16, around: 32 };    // mid's skirt: 32 columns (24 left up to 2.5 cm between it and near's 40 in a stride; 32 is within 1 cm: tools/people/switch-check.mjs)
 const FAR_SKIRT = { rings: 16, around: 24 };    // the far class's skirt: 24 columns, no bridging (16 columns left 3.1 to 3.6% of a dressed person's pixels differing from mid's at 4 to 10 m, over check.mjs's 3%: the hem and the silhouette)
 const LATER_AFTER_UPDATES = 4;               // compile()'s deferred classes start compiling this many frames in
@@ -141,6 +143,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   // ---- the draws: an entry a (tier, class) ----
   const tiers = { far: { cap: capacity }, mid: { cap: stores.mid.capMax }, near: { cap: nearCapacity } };
   const entries = new Map();
+  const hair = makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU, perRow, walkW, F, B, REST_W });
   const baseGeometry = {};
   const classKeys = new Map();         // outfit id -> its keys by wear mask (a string made once, not a person a frame)
   const classKey = (rec) => {
@@ -169,6 +172,14 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       return o;
     })());
     for (const [k, a] of Object.entries(attrs)) g.setAttribute(k, a);
+    if (tier === "far") {
+      const region = new Float32Array(g.attributes.position.count);
+      region.set(hairRegion(TEMPLATE.position));
+      // Reuse paint's otherwise-unused skin RGB channel; no ninth vertex buffer on WebGPU.
+      const paint = g.attributes.paint.array.slice();
+      for (let v=0;v<TEMPLATE.V;v++) if (paint[4*v+3]===0) paint[4*v]=region[v];
+      g.setAttribute("paint", new THREE.BufferAttribute(paint,4));
+    }
     g.setIndex(new THREE.BufferAttribute(outfit ? layoutOf(kind, outfit).indexFor(mask) : T.index, 1));
     return g;
   }
@@ -225,6 +236,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     if (outfit) garmentStore(kind, outfit);
     const mesh = new THREE.Mesh(g, e.material.m); mesh.count = 0; mesh.frustumCulled = false; mesh.name = `people-${tier}-${outfit ? outfit.id + ":" + mask : "base"}`;
     group.add(mesh); e.mesh = mesh;
+    if(tier === "far") hair.attachFar(e);
     entries.set(key, e);
     return e;
   }
@@ -249,6 +261,10 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       c = mix(c, col(6), step(5.5, k).mul(float(1).sub(step(6.5, k))));                                 // the stockings
       c = mix(c, col(5).mul(BAND_SHADE), step(6.5, k));                                                 // the knee band: the skirt's (breeches') colour a shade darker
       m.colorNode = varying(mix(c, paint.rgb, own));
+    }
+    if (tier === "far") {
+      const hc = textureLoad(agentTex, ivec2(outfit ? 7 : 4, i));
+      m.colorNode = mix(m.colorNode, varying(hc.rgb), varying(paint.r.mul(float(1).sub(step(0.5,paint.w))).mul(hc.w)));
     }
     const walk = walkNode();
     const gstore = outfit ? garmentStore(e.kind) : null;
@@ -332,6 +348,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
     for (let r = 0; r < 2 * B; r++) packHalf(walkData, ((by + r) * walkW + bx) * 4, bakeBits, r * (F + 1) * 4, (F + 1) * 4);
     rec.walkSlot = slot; walkDirty = true;
+    hair.prepareFar(rec);
     budgetLeft -= performance.now() - t;
     return true;
   }
@@ -345,6 +362,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const nearBody = (rec) => () => {
     const b = rec.buildNear(), d = rec.dressing;
     if (d) { const baked = bakeNear(b, rec.bodyParams, d.outfit); rec.nearGarment = baked; b.cut = new Float32Array(b.V); b.cut.set(baked.layerCut, UVN); }
+    rec._hairBody = b;
     return b;
   };
   // her skirt's row: the numbers the passes read (fork B's writeSpecRow), kept with her
@@ -396,6 +414,9 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         D[o + 7] = far.scale;
         for (let q = 0; q < KT; q++) D[base + q] = far.coef[q];
       }
+      const ho = o + (outfit ? 7 : 4)*4;
+      D[ho]=rec.hair.colour[0];D[ho+1]=rec.hair.colour[1];D[ho+2]=rec.hair.colour[2];D[ho+3]=rec.hair.style ? 1 : 0;
+      if(name !== "far") { budgetLeft -= hair.add(name,rec,rec._hairBody); rec._hairBody = null; }
       n++;
     }
     return n;
@@ -410,6 +431,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     /** Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
     update(sorted) {
       budgetLeft = bakeBudgetMs;
+      hair.begin();
       if (startLater && ++updates >= LATER_AFTER_UPDATES) { const go = startLater; startLater = null; go(); }
       const demoted = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
       for (const sh of Object.values(dressedTiers)) { sh.rows = 0; sh.blocks = 0; }
@@ -439,19 +461,23 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; }
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
+      counts.hairDraws = hair.end();
+      counts.classes += counts.hairDraws;
       return counts;
     },
     /** Make the draws for every tier of the base class and of each outfit worn in full, before anyone is in them, so a renderer can compile their pipelines ahead (compileAsync) instead of at the first frame someone is drawn. */
     warm(outfitList = []) {
       for (const tier of ["near", "mid", "far"]) { entryOf(tier, null, 0); for (const o of outfitList) entryOf(tier, o, 3); }
-      return entries.size;
+      hair.warm();
+      return entries.size + hair.entries.length;
     },
     /** Compile everything warm() made on a renderer: each class's draw and each tier's skirt passes (which a scene's compileAsync does not reach: they render into targets, and would build at the first frame), in chains that overlap each other's waits. Settles when all have. Add `group` to the scene first; `scene` is the one it is rendered in (its lights). */
     compile(renderer, scene, camera, { serial = typeof self !== "undefined" && typeof self.scheduler?.yield === "function", chains = serial ? Infinity : 3, defer = true } = {}) {
       // In chains, each its objects one after the other (compileAsync of a scene is one chain, and waits on each pipeline before building the next one's code): while one waits on the driver another builds code.
       // three yields to the page between the stages of building a draw's code with scheduler.yield() (a moment) where there is one, and else with requestAnimationFrame (a frame, 17 ms, which is a phone's
       // Safari: nine stages of waiting a draw, a second and a half for fifteen of them in one chain), so there every object is a chain of its own and their waits are the same frames.
-      const passes = [], meshes = [], later = { passes: [], meshes: [] };
+      hair.warm();
+      const passes = [], meshes = [...hair.entries], later = { passes: [], meshes: [] };
       for (const e of entries.values()) (defer && e.tier === "near" && e.outfit ? later.meshes : meshes).push(e);
       for (const sh of Object.values(dressedTiers)) {
         const list = defer && sh.tier === "near" ? later.passes : passes;
@@ -492,7 +518,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       // (each material's other draws follow its first as it settles, not when every first has)
       const followers = new Map(); for (const e of others) { if (!followers.has(e.material)) followers.set(e.material, []); followers.get(e.material).push(e); }
       const withFollowers = (e) => () => Promise.resolve(compileDraw(e)).then(() => Promise.all((followers.get(e.material) ?? []).map(compileDraw)));
-      const rest = run([...passes.map((x) => () => compilePass(x)), ...firsts.map(withFollowers)], chains).finally(unlock);
+      const rest = hair.ready.then(() => run([...passes.map((x) => () => compilePass(x)), ...firsts.map(withFollowers)], chains)).finally(unlock);
       let allReady = null;
       const deferred = new Promise((res) => { allReady = res; });
       if (later.meshes.length) {
@@ -507,10 +533,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     release(rec) {
       if (rec.walkSlot !== undefined) { freeWalk.push(rec.walkSlot); rec.walkSlot = undefined; }
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) st.release(rec);
+      hair.release(rec);
       garmentFrom.delete(rec.id); rec.nearGarment = undefined; rec.specRow = undefined;
     },
     // walk texture, the far basis (two half-float textures), the rest slots of both topologies and the baked bodices (half floats), the skirts' spec rows, their render-to-texture passes (RGBA32F, a texel per person, ring and column) and the agent textures
-    bytes: () => walkData.byteLength + dd.length + [...Object.values(stores), ...Object.values(gstores)].reduce((n, st) => n + st.data.byteLength, 0)
+    bytes: () => hair.bytes() + walkData.byteLength + dd.length + [...Object.values(stores), ...Object.values(gstores)].reduce((n, st) => n + st.data.byteLength, 0)
       + [...entries.values()].reduce((n, e) => n + (e.shared ? 0 : e.data.byteLength), 0)
       + Object.values(dressedTiers).reduce((n, sh) => n + sh.data.byteLength + (sh.skirt ? sh.skirt.specData.byteLength + sh.skirt.RW * sh.skirt.RH * 16 * sh.skirt.passes.length : 0), 0),
   };
