@@ -1,3 +1,4 @@
+import { peopleQuality } from "./people/quality.js";
 // The live people demo (Kabe, 2026-10-12: demos on GitHub Pages, as holo-emitter has them): makePeople running in real
 // time, one scene per check. Drag to look around, pinch or scroll to zoom. Scenes ride in the hash (#meet, #plaza, #words).
 import * as THREE from "three/webgpu";
@@ -25,11 +26,13 @@ const home = document.createElement("a"); home.href = "./"; home.textContent = "
 document.getElementById("about").textContent = SCENES[kind].about + " Drag to look around.";
 const hud = document.getElementById("hud");
 
-const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: true });
+const q = new URLSearchParams(location.search);
+const quality = peopleQuality(q.get("q"));
+const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: q.get("gl") === "1" });
 renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
 document.body.prepend(renderer.domElement);
 await renderer.init();
-const scene = makeStage(THREE);
+const scene = makeStage(THREE, { quality, renderer });
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49;
@@ -40,7 +43,12 @@ let people = null, plaza = null, round = 0, loading = false;
 
 function start() {
   if (people) scene.remove(people.group);
-  if (kind !== "plaza") { people = makePeople(THREE, { basis, thresholds: { near: 4, mid: 14 } }); scene.add(people.group); }
+  if (kind !== "plaza") { people = makePeople(THREE, { basis, quality, thresholds: { near: 4, mid: 14 } }); scene.add(people.group); }
+  if (kind !== "plaza") {
+    loading = true; people.warm();
+    const preparing = people; scene.remove(preparing.group);
+    renderer.compileAsync(scene, camera).then(() => { scene.add(preparing.group); return preparing.compile(renderer, scene, camera, { defer: false }); }).then(() => { loading = false; });
+  }
   round++;
   if (kind === "meet") WORDS.forEach((w, i) => {
     const id = `m${round}.${i}`;
@@ -54,7 +62,7 @@ function start() {
   });
   if (kind === "plaza") {                       // shared with the phone benchmark (plaza.js); its pipelines compile before the first frame
     loading = true;
-    plaza = makePlaza(THREE, { basis, compile: async (g, people) => { await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); } }); people = plaza.people;
+    plaza = makePlaza(THREE, { basis, quality, compile: async (g, people) => { await renderer.compileAsync(scene, camera); scene.add(g); await people.compile(renderer, scene, camera, { defer: false }); } }); people = plaza.people;
     plaza.ready.then(() => { loading = false; });
   }
 }
@@ -68,7 +76,7 @@ start();
 let last = performance.now(), t = 0, frames = 0, since = last, fps = 0;
 renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
-  if (loading) { hud.textContent = "preparing 300 people…"; return; }
+  if (loading) { hud.textContent = "preparing people…"; return; }
   t += dt;
   controls.update();
   const c = plaza ? plaza.tick(t, dt, camera) : people.tick(t, dt, camera);

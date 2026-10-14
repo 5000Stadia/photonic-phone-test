@@ -7,7 +7,7 @@ import { crowdHairMaterial } from './hair-material.js';
 import { BONES } from './bodies.js';
 import { farReducedPositions } from './garments/reduced.js';
 const HEAD = BONES.findIndex(b=>b[0]==='head');
-export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU, perRow, walkW, F, B, REST_W }) {
+export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU, perRow, walkW, F, B, REST_W, quality = "phone" }) {
   const states={}, entries=[], entryMap=new Map();
   // One atlas for every style: program sharing cannot depend on a material per style.
   const canvas=document.createElement('canvas'); canvas.width=3072; canvas.height=2048;
@@ -58,7 +58,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       for(let v=0;v<n;v++){uv[2*v]=(Math.min(.9999,Math.max(.0001,uv[2*v]))+tile%3)/3;uv[2*v+1]=(Math.min(.9999,Math.max(.0001,uv[2*v+1]))+Math.floor(tile/3))/2;}
       for(const [name,arr,size] of [['uv',uv,2],['tangent',s.cuts[2].tangent,4],['rt',s.rt,1],['hl',s.hl,1],['sp',s.sp,3]])g.setAttribute(name,new THREE.BufferAttribute(arr,size));
     }
-    const mesh=new THREE.Mesh(g,st.m);mesh.count=0;mesh.frustumCulled=false;mesh.name='people-hair-'+key;group.add(mesh);
+    const mesh=new THREE.Mesh(g,st.m);mesh.count=0;mesh.frustumCulled=false;mesh.name='people-hair-'+key;mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
     mesh.userData.rowBase=HAIR_STYLES.indexOf(id)*3; mesh.userData.hairShading=s.shading;
     const rim=new THREE.Mesh(g,st.mats.rim);rim.count=0;rim.frustumCulled=false;rim.name=mesh.name+'-rim';rim.renderOrder=1;rim.userData=mesh.userData;group.add(rim);
     e={key,tier,id,mesh,rim,material:st.m};entries.push(e,{mesh:rim,material:st.mats.rim});entryMap.set(key,e);return e;
@@ -99,6 +99,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       g.setIndex(new THREE.BufferAttribute(s.far.index,1));
       const mesh=new THREE.Mesh(g,m);mesh.count=0;mesh.frustumCulled=false;mesh.name='people-hair-far-'+body.key+'-'+id;
       mesh.userData={body,style:j+1};group.add(mesh);
+      mesh.castShadow=false;mesh.receiveShadow=true;
       const e={mesh,material:m,body};farEntries.push(e);entries.push(e);
     }
   }

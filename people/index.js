@@ -10,9 +10,9 @@ import { GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN } from "./garments/outfit.js
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits } = {}) {
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality } = {}) {
   const pop = makePopulation({ ctx, basis, thresholds, planBudget, ...(outfits !== undefined ? { outfits } : {}) });
-  const draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs });
+  const draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
   let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };

@@ -1,3 +1,4 @@
+import { peopleQuality } from "./people/quality.js";
 // The lineup (R5, "Done when: the lineup"): thirty people from age 0 to 90, of every build, each dressed for 1660 from their own words ("a girl of 8 in a red dress" is a girl in a red dress).
 // Everyone is drawn at the near tier (they are close); drag to look around, pinch or scroll to zoom. Standing, or walking in place. The cast and its words are cast.js; the words become a dress in
 // src/people/dress-words.js, and a colour the outfit's palette lacks is said under the caption, never silently swapped. ?gl=1 forces WebGL2.
@@ -16,6 +17,7 @@ const VIEW = [[0, 11.9, 11.2], [0, 0.5, -3.4]];
 const cast = castOf();
 const by = new Map(cast.map((c) => [c.id, c]));
 const q = new URLSearchParams(location.search);
+const quality = peopleQuality(q.get("q"));
 
 const hud = document.getElementById("hud");
 document.getElementById("about").textContent = "Thirty people, from a baby to ninety, each dressed from their own words (1660 London). Each caption is what the person was made from; under it the outfit, and any colour the outfit could not make. Drag to look around.";
@@ -29,7 +31,7 @@ renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWid
 document.body.prepend(renderer.domElement);
 await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? "WebGPU" : "WebGL2";
-const scene = makeStage(THREE);
+const scene = makeStage(THREE, { quality, renderer });
 const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.1, 400);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 1.2; controls.maxDistance = 40;
@@ -41,12 +43,14 @@ view(VIEW);
 
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
 // everyone close: the near tier from any distance the page can be orbited to
-const people = makePeople(THREE, { basis, thresholds: { near: 200, mid: 400 }, nearCapacity: 32, outfits: (id) => { const d = by.get(id)?.dress; return d?.outfit ? { outfit: d.outfit, look: d.look } : null; } });
+const people = makePeople(THREE, { basis, quality, thresholds: { near: 200, mid: 400 }, nearCapacity: 32, outfits: (id) => { const d = by.get(id)?.dress; return d?.outfit ? { outfit: d.outfit, look: d.look } : null; } });
 scene.add(people.group);
 people.warm([GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN]);
 const place = (i) => [((i % ROW) - (ROW - 1) / 2) * DX, 0, -Math.floor(i / ROW) * DZ];
 const handles = cast.map((c, i) => people.add({ id: c.id, seed: c.seed, recipe: c.said, at: { pos: place(i), room: "hall" }, state: { heading: 0, phase: STAND } }));
-await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]);
+scene.remove(people.group);
+await renderer.compileAsync(scene, camera); scene.add(people.group);
+await people.compile(renderer, scene, camera, { defer: false });
 
 // the captions
 const tags = document.getElementById("tags"), list = document.getElementById("list");
