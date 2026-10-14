@@ -61,6 +61,13 @@ export const PERSON = {
   lad: { sex: ["male"], age: [10, 25] }, lass: { sex: ["female"], age: [10, 25] }, child: { age: [2, 12] }, baby: { age: [0, 1.5] },
   infant: { age: [0, 1.5] }, toddler: { age: [1, 3] }, youth: { age: [13, 20] }, teenager: { age: [13, 19] },
   person: {}, figure: {}, stranger: {},
+  male: { sex: ["male"] }, female: { sex: ["female"] },
+  steward: { sex: ["male"], age: [18, 100] }, apprentice: { sex: ["male"], age: [12, 25] },
+  ploughman: { sex: ["male"], age: [16, 100] }, labourer: { sex: ["male"], age: [16, 100] },
+  porter: { sex: ["male"], age: [16, 100] }, footman: { sex: ["male"], age: [16, 100] }, constable: { sex: ["male"], age: [21, 100] },
+  maid: { sex: ["female"], age: [12, 100] }, washerwoman: { sex: ["female"], age: [16, 100] },
+  cook: { sex: ["female"], age: [16, 100] }, housekeeper: { sex: ["female"], age: [18, 100] },
+  servant: { age: [12, 100] },
   barmaid: { sex: ["female"], age: [15, 45] }, // a trade word: sex and age only for now; trades shape wardrobe in M3
 };
 export const AGE_WORD = {
@@ -227,7 +234,9 @@ export function parse(text) {
     if (PERSON[t]) {
       flushAsPerson();
       const d = PERSON[t];
-      if (d.sex) constraints.push({ trait: "sex", in: d.sex, word: t });
+      // Cook's period default yields to an explicit sex word, in either order.
+      const cookOverride = t === "cook" && toks.some(w => w !== "cook" && PERSON[w]?.sex);
+      if (d.sex && !cookOverride) constraints.push({ trait: "sex", in: d.sex, word: t });
       if (d.age) constraints.push({ trait: "age", v: d.age, word: t });
       i++; continue;
     }

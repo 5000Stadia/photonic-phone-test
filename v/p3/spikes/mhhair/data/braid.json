@@ -1,0 +1,38 @@
+{
+"id": "braid",
+"name": "Side braid",
+"licence": "CC0",
+"author": "MakeHuman system assets",
+"source": "http://www.makehumancommunity.org",
+"rows": 4493,
+"vertices": 4771,
+"triangles": 5518,
+"body": 13380,
+"scale": [
+[
+5399,
+11998
+],
+[
+791,
+881
+],
+[
+962,
+5320
+]
+],
+"scaleBase": [
+1.48,
+2.3298,
+1.9221
+],
+"helperRefs": 13479,
+"scalpMeanDm": 0.231,
+"scalpInsidePct": 0.0,
+"atlas": {
+"size": 1024,
+"median": 0.044,
+"detail": 0.0209
+}
+}

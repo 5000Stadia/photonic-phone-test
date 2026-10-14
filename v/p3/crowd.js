@@ -1,0 +1,707 @@
+// The crowd probe (M1, R2): what is the cheapest way to draw 300 *different* walking skinned bodies in very few draws, in three.js r186
+// (WebGPURenderer on WebGPU and on WebGL 2)? See RESULTS.md. One page, three candidates plus the built-in path, on the stand-in body
+// of body.js:
+//   ?method=c1   K archetype bodies (?K=12), one instanced draw each, per-instance scale, tint and phase
+//   ?method=c2   one instanced draw of the mean body + a morph basis (?k=16 targets); each instance's coefficients in three's own
+//                InstancedMesh-style morphTexture (built-in TSL morph), then skinning in our position node from the rig textures
+//   ?method=c3   one merged geometry holding n unique rest shapes; person = vertexIndex / vertices-per-body; skinned the same way
+//   ?method=c2b  three's built-in path only: a SkinnedMesh marked instanced (as in webgpu_skinning_instancing) with the morphTexture.
+//                Morph and skin compose, but every instance shares one skeleton: one pose, one phase, mean-body joints.
+//   ?method=c2c  C2 with our own morph in the position node: coefficients as instanced attributes, deltas in an RGBA16F texture
+//   ?method=c3t  C3 without the merged buffer: the template mesh instanced, each instance's rest shape read from an RGBA16F texture
+// Other switches: ?n=300 people · ?webgl=1 forces WebGL 2 · ?shadows=1 · ?view=close · ?seed=1 · ?dpr=1 · ?gpu=0 (no timestamps)
+// ?run=1 measures (2 s warm-up, 5 s timed, then 40 frames drawn one at a time with their GPU timestamps awaited) and sets
+// window.__result; ?shot=1 sets window.__shot when the picture is ready.
+//
+// Skinning (c1, c2, c3): bone world rotations R_b(frame) are the same for every body (identity rest rotations), so they live in one
+// small texture; each rig (a body, or an archetype in c1) has u_b(frame) = P_b - R_b j_b in a second texture. A vertex is
+// x' = sum_k w_k (R_bk x + u_bk). Both textures are RGBA16F with linear filtering, laid out frames along x with frame 0 repeated at
+// the end, so one filtered fetch interpolates between frames: 4 fetches per influence, as three's own bone-matrix skinning.
+import * as THREE from "three/webgpu";
+import { Fn, texture, textureLoad, ivec2, int, float, vec2, vec3, uniform, instanceIndex, vertexIndex, attribute, positionLocal, normalLocal, cos, sin, varying } from "three/tsl";
+import * as Bd from "./body.js";
+import { cross, context, renderOutput } from "three/tsl";
+
+// R9 (the iPhone gaps, 2026-10-12) adds flags to the hash token, after METHOD-N: gl (WebGL 2, chosen explicitly),
+// own (each person walks their own fitted gait, baked once per person: walkers.js), near (one near person with skin and
+// hair from spikes/appearance and spikes/hair, 2.6 m from the camera), room (camera at eye height inside a dense room),
+// suiteV.S (the R9 ramp: variant V at step S, reloading itself; results in sessionStorage) and sustain (ten minutes).
+// Published as a private claude.ai page for Kabe's phone test (2026-10-12): the artifact frame passes no query string, so the
+// settings ride in the hash as one token, METHOD-N[-gl] (e.g. #c3t-300, #c3t-1000-gl), and the buttons reload with a new token.
+const TOKEN = (location.hash || "").replace(/^#/, "").split("-");
+const FLAGS = TOKEN.slice(2).filter(f => f !== "gl" && f !== "close");
+const P = { method: TOKEN[0] || "c3t", n: TOKEN[1] || "300", webgl: TOKEN.includes("gl") ? "1" : "0" };
+const PLAZA = FLAGS.includes("plaza"), OWN = FLAGS.includes("own"), NEAR = FLAGS.includes("near"), ROOM = FLAGS.includes("room"), SUSTAIN = FLAGS.includes("sustain");
+const SUITE = (FLAGS.find(f => f.startsWith("suite")) || "").replace("suite", "");
+if (TOKEN.includes("close")) P.view = "close";
+const Q = { get: (k) => (k in P ? P[k] : null) };
+const method = Q.get("method") || "c3t", N = +(Q.get("n") || 300), K = +(Q.get("K") || 12), KT = Math.min(16, +(Q.get("k") || 16));
+const seed = +(Q.get("seed") || 1), F = 32, RUN = Q.get("run") === "1", SHOT = Q.get("shot") === "1", SHADOWS = Q.get("shadows") === "1";
+const hud = document.getElementById("hud"), say = t => { hud.textContent = t; };
+const nav = document.getElementById("nav");
+const go = (set) => { const p = { ...P, flags: FLAGS, ...set }; location.hash = [p.method, p.n].concat(p.webgl === "1" ? ["gl"] : [], p.flags).join("-"); location.reload(); };
+// The R9 suite: four variants, each ramped up the steps until the median frame passes 34 ms (under 30 fps).
+const STEPS = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000];
+// Second run (after Kabe's first one-run benchmark, 2026-10-12: the near person cost 50-65 ms, her skin's paint and her
+// hair; the crowd and the warm phone were fine). Her skin is now gated by region; these take what is left apart: her hair's
+// blended fringe pass, MSAA (which her hair's alpha-to-coverage rides on), and the GPU's true cost under vsync ("sync":
+// one pixel read back after each render, so render() covers the GPU's whole frame).
+// Fifth run (2026-10-13): baked skin and the MakeHuman hair shells brought her to about the crowd's own cost.
+// Sixth run (after Kabe moved to iOS 26, 2026-10-13: Safari now offers WebGPU, but every run so far pinned WebGL2). The same
+// crowd and near person on both backends, side by side ("wgpu": not pinned to WebGL2). WebGPU has no pixel read-back sync, so
+// its rows also time each frame's submit to the queue's "work done" (GPU done), the GPU's own frame there.
+const NB = ["own", "near", "inline", "sync"], NEARNOW = [...NB, "skinbake", "mhbob"];
+// Seventh run (R7, the real people): the live demo's plaza first (300 MakeHuman people in three tiers; "dressed" has the gentlewoman's
+// outfit on about one woman or girl in five, as the demo does, and "undressed" none), on WebGL2 and on WebGPU, then the old
+// stand-in crowd and near person as before. The 3000-person stand-in rows are dropped to keep the run near four minutes.
+const PL = ["plaza", "sync"];
+const VARIANTS = [["real plaza, undressed, WebGL2", PL, [300]], ["real plaza, dressed, WebGL2", [...PL, "dressed"], [300]],
+  ["real plaza, undressed, WebGPU", [...PL, "wgpu"], [300]], ["real plaza, dressed, WebGPU", [...PL, "dressed", "wgpu"], [300]],
+  ["crowd only, WebGL2", ["own", "inline", "sync"], [300, 1000]], ["crowd only, WebGPU", ["own", "inline", "sync", "wgpu"], [300, 1000]],
+  ["near person (baked skin, bob), WebGL2", NEARNOW, [100, 300]], ["near person (baked skin, bob), WebGPU", [...NEARNOW, "wgpu"], [100, 300]]];
+const SYNCED = VARIANTS.map(([, f]) => f.includes("sync"));
+const LONG = false;   // the ten minutes and the warm repeat: the first run showed no throttling, so this run skips them
+// Every benchmark in one run (Kabe, 2026-10-12: "one run handle all of the benchmarks", back to back for a longer
+// play-through): the ramp on a cool phone, then ten minutes at 300 with everything on, then the same 300 again warm.
+// The log lives in localStorage across the reloads and ends in one report to copy or send.
+const BENCH_KEY = "photonic-bench";
+const store = {
+  all: () => { try { return JSON.parse(localStorage.getItem(BENCH_KEY) || "null") || { rows: [] }; } catch (_) { return { rows: [] }; } },
+  save: (b) => { try { localStorage.setItem(BENCH_KEY, JSON.stringify(b)); } catch (_) {} },
+  get: () => store.all().rows, set: (rows) => { const b = store.all(); b.rows = rows; store.save(b); },
+};
+const WARM = [4, 5];                                       // the variants measured again at 300 once the phone is warm
+const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
+const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], ...(VARIANTS[v][1].includes("wgpu") ? [] : ["gl"]), ...VARIANTS[v][1], ...QUICK, `suite${v}.${st}`].join("-"); location.reload(); };
+const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
+const warmGo = (k) => { location.hash = ["c2c", 300, "gl", ...VARIANTS[WARM[k]][1], ...QUICK, `suiteW${k}`].join("-"); location.reload(); };
+const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now(), fixed: true }); suiteGo(0, 0); };
+const STAGE = !SUITE ? null : SUITE === "S" ? "sustain" : SUITE[0] === "W" ? "warm" : "ramp";
+try { navigator.wakeLock?.request("screen").catch(() => {}); } catch (_) {}   // keep the screen on where Safari allows it
+const buttons = [["one draw (c3t)", () => go({ method: "c3t" }), method === "c3t" && !SUITE], ["morph basis (c2c)", () => go({ method: "c2c" }), method === "c2c" && !SUITE],
+  ["300", () => go({ n: "300" }), N === 300], ["1000", () => go({ n: "1000" }), N === 1000],
+  ["own walks", () => go({ flags: OWN ? FLAGS.filter(f => f !== "own") : [...FLAGS, "own"] }), OWN],
+  ["near person", () => go({ flags: NEAR ? FLAGS.filter(f => f !== "near") : [...FLAGS, "near"] }), NEAR],
+  ["inside the room", () => go({ flags: ROOM ? FLAGS.filter(f => f !== "room") : [...FLAGS, "room"] }), ROOM],
+  [P.webgl === "1" ? "use WebGPU" : "use WebGL2", () => go({ webgl: P.webgl === "1" ? "0" : "1" }), false],
+  ["Run every benchmark (about 4 min)", startAll, !!SUITE],
+  ...(store.all().done ? [["Show the last results", () => { renderer.setAnimationLoop(null); report(store.all()); }, false]] : [])];
+for (const [label, fn, on] of buttons) {
+  const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+  if (on) b.className = "on";
+  b.addEventListener("click", fn);
+  nav.append(b);
+}
+// What this browser offers, shown first, so a failure says what is missing (Kabe's iPhone reported "browser can't support it").
+const caps = (() => { let gl2 = false; try { gl2 = !!document.createElement("canvas").getContext("webgl2"); } catch (_) {}
+  return `WebGPU ${"gpu" in navigator ? "present" : "absent"} · WebGL2 ${gl2 ? "present" : "absent"} · ${navigator.userAgent}`; })();
+say("starting…\n" + caps);
+let lastErr = ""; try { lastErr = sessionStorage.getItem("webgpuError") || ""; } catch (_) {}
+const fail = (m) => { try { if (P.webgl !== "1") sessionStorage.setItem("webgpuError", String(m)); } catch (_) {}
+  say("error: " + m + "\n" + caps + (P.webgl === "1" ? "" : "\ntrying WebGL2 in 3 s…"));
+  if (P.webgl !== "1") setTimeout(() => go({ webgl: "1" }), 3000); };
+window.onerror = (m) => fail(m);
+window.addEventListener("unhandledrejection", (e) => fail(e.reason && e.reason.message || String(e.reason)));
+
+const tBuild0 = performance.now();
+const INLINE = FLAGS.includes("inline");
+const renderer = new THREE.WebGPURenderer({ antialias: !FLAGS.includes("noaa"), outputBufferType: FLAGS.includes("aa8") ? THREE.UnsignedByteType : THREE.HalfFloatType, forceWebGL: Q.get("webgl") === "1", trackTimestamp: Q.get("gpu") !== "0" && "gpu" in navigator && P.webgl !== "1" });
+renderer.setPixelRatio(Q.get("dpr") ? +Q.get("dpr") : FLAGS.includes("dpr1") ? 1 : Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = SHADOWS;
+if (INLINE) {   // no off-screen target: ACES and sRGB in every material's output, drawn straight into the canvas
+  renderer.toneMapping = THREE.NoToneMapping; renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+  renderer.contextNode = context({ getOutput: (o) => renderOutput(o, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) });
+}
+document.body.prepend(renderer.domElement); await renderer.init();
+const backend = renderer.backend.isWebGPUBackend ? "webgpu" : "webgl2";
+// ---------- measuring helpers, the people digest and the device line (shared by every variant, the real plaza too) ----------
+const mean_ = a => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), pct = (a, q) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
+// sync: read one pixel back after each render, so render() covers the GPU's whole frame and vsync can't hide it
+// (iOS WebGL 2 has no timer queries; this costs the pipelining, so it reads a little high: for cost checks only)
+// WebGPU has no read-back sync: each frame's submit is timed to the queue's work done. While the GPU keeps up, that latency is
+// its frame; once it falls behind the queue backs up and latency only grows, so the gap between successive frames finishing
+// is its frame instead. GPU done is the smaller of the two medians.
+const SYNC = FLAGS.includes("sync"), px = new Uint8Array(4);
+const gpuDone = [], gpuEnds = [];
+const syncGpu = () => { const gl = renderer.backend.gl; if (gl) { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return; }
+  const q = renderer.backend.device?.queue; if (!q) return; const t = performance.now();
+  q.onSubmittedWorkDone().then(() => { const e = performance.now(); gpuDone.push(e - t); gpuEnds.push(e); }); };
+const gpuFrame = () => { if (gpuEnds.length < 3) return undefined; const gaps = gpuEnds.slice(1).map((e, i) => e - gpuEnds[i]);
+  return +Math.min(pct(gpuDone, 0.5), pct(gaps, 0.5)).toFixed(2); };
+// ---------- same people on this engine: the golden 200 resolved here, digested, compared with node's ----------
+// (R4's "same doc, same person"; on the iPhone this is the WebKit check, gate gcbbc51)
+// During the ramp it runs once, at the end: on the phone it takes a moment of the main thread, which would otherwise land
+// inside every step's measurement (each step reloads the page).
+let sameText = SUITE ? "people digest: at the end of the ramp" : "people digest: checking…";
+const runSame = async () => {
+  try {
+    const { resolve } = await import("./traits/resolve.js");
+    const golden = (await (await fetch(new URL("./golden.sha256", import.meta.url))).text()).trim();
+    const dump = [];
+    for (let s = 0; s < 200; s++) {
+      const r = resolve({ id: "g" + s, seed: s * 7919, said: ["", "a man with a very big nose", "a long-haired blonde woman in a red dress", "an old man"][s % 4] });
+      dump.push(JSON.stringify(Object.entries(r.values).sort(([a], [b]) => (a < b ? -1 : 1))));
+    }
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dump.join("\n")));
+    const d = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    sameText = d === golden ? "people digest: same 200 people as node ✓" : `people digest: DIFFERENT from node (${d.slice(0, 12)}…)`;
+  } catch (e) { sameText = "people digest: could not run (" + (e && e.message || e) + ")"; }
+  return sameText;
+};
+const ios = (navigator.userAgent.match(/OS (\d+)[_.](\d+)(?:[_.](\d+))? like Mac/) || []).slice(1).filter(Boolean).join(".");
+// Safari 26 freezes the OS in its user agent at 18.x; its own version (Version/26.x) is the real one
+const safari = (navigator.userAgent.match(/Version\/(\d+(?:\.\d+)?)/) || [])[1];
+const device = `${safari && ios ? "Safari " + safari + " (user agent says iOS " + ios + ")" : ios ? "iOS " + ios : navigator.platform} · WebGPU ${"gpu" in navigator ? "present" : "absent"} · running ${backend}`;
+const stats = (a) => ({ median: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1) });
+
+// ---------- R7: the real plaza (the live demo's "300 in a plaza": MakeHuman bodies in three tiers, the gentlewoman's outfit) ----------
+// Flag "plaza" with "dressed" (outfits as in the demo: about one woman or girl in five) or without it (outfits off). The scene, the
+// people and the camera come from plaza.js, the demo's own; the camera stays fixed so runs compare. The old stand-in crowd below
+// is not built at all. The row records the frame (median, slowest 5%), render(), GPU done, the people tick's CPU, the first-sight
+// build (from creating the people to the first frame drawn, GPU idle) and the tiers at the end.
+async function plazaRun() {
+  const [{ makeStage, makePlaza, PLAZA_VIEW }, G] = await Promise.all([import("./plaza.js"), import("./gait.js")]);
+  const basis = G.loadBasis(await (await fetch(new URL("./gait-basis.json", import.meta.url))).json());
+  const dressed = FLAGS.includes("dressed");
+  renderer.toneMapping = THREE.NoToneMapping;                       // as the demo has it
+  const scene = makeStage(THREE), camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
+  camera.position.set(...PLAZA_VIEW[0]); camera.lookAt(...PLAZA_VIEW[1]); camera.updateMatrixWorld();
+  addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  const idle = () => new Promise((res) => { const q = renderer.backend.device?.queue; if (q) q.onSubmittedWorkDone().then(res); else { syncGpu(); res(); } });
+  const label = `real plaza, ${dressed ? "dressed" : "undressed"}, ${backend === "webgpu" ? "WebGPU" : "WebGL2"}`;
+  say(`${label}: building 300 people…\n${caps}`);
+  await new Promise(r => setTimeout(r, 50));                         // let the message paint before the main thread is busy
+  const tSight = performance.now();
+  // the pipelines compile ahead, in the loading phase (people.warm, then compileAsync beside people.compile, which also builds the
+  // skirt passes; nothing deferred, so no hitch after loading) and one warm render; "loading" is all of that, and first sight is
+  // the first frame after it, the one a player sees
+  const compile = async (g, people) => { await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); };
+  const plaza = makePlaza(THREE, { basis, compile, ...(dressed ? {} : { outfits: false }) });
+  await plaza.ready;
+  let counts = plaza.tick(1 / 60, 1 / 60, camera);
+  renderer.render(scene, camera); await idle();
+  const loading = performance.now() - tSight, tFirst = performance.now();
+  counts = plaza.tick(2 / 60, 1 / 60, camera);
+  renderer.render(scene, camera); await idle();
+  const firstSight = performance.now() - tFirst;
+  let t = 1 / 60, last = performance.now(), lastHud = 0, t0 = null, t1 = null;
+  const settleF = [], fr = [], tk = [], rn = [];
+  const finishRow = () => {
+    renderer.setAnimationLoop(null);
+    const row = { n: 300, ...stats(fr), settledAt: +t1.toFixed(1), cpu: +mean_(tk).toFixed(2), render: +mean_(rn).toFixed(2),
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(firstSight), loading: Math.round(loading), backend,
+      counts: { near: counts.near, mid: counts.mid, far: counts.far, classes: counts.classes, passes: counts.passes },
+      ...(gpuEnds.length >= 3 ? { gpuDone: gpuFrame() } : {}), ...(FLAGS.includes("wgpu") && backend !== "webgpu" && lastErr ? { err: lastErr.slice(0, 120) } : {}) };
+    if (SUITE) { const [v, st] = SUITE.split(".").map(Number), b = store.all(); b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b); return advance(v, st); }
+    window.__plaza = row; say(`${label}\n${JSON.stringify(row)}`);
+  };
+  renderer.setAnimationLoop(() => {
+    const now = performance.now(), frameMs = now - last, dt = Math.min(0.1, frameMs / 1000); last = now; t += dt;
+    const a = performance.now(); counts = plaza.tick(t, dt, camera); const b = performance.now();
+    renderer.render(scene, camera); if (SYNC) syncGpu(); const c = performance.now();
+    if (t0 === null) t0 = now;
+    const s = (now - t0) / 1000;
+    if (t1 === null) {          // the same settling as the ramp: at least 4 s, at most 15, until the last half second matches the one before
+      settleF.push(frameMs);
+      const n = settleF.length, med = (x) => pct(x, 0.5), k = Math.max(10, Math.round(500 / Math.max(1, med(settleF.slice(-20)))));
+      if (s < 4 || (s < 15 && (n < 2 * k || Math.abs(med(settleF.slice(n - 2 * k, n - k)) - med(settleF.slice(n - k))) > 0.15 * med(settleF.slice(n - k))))) {
+        if (now - lastHud > 500) { lastHud = now; say(`${label}: settling ${s.toFixed(0)} s · loading ${loading.toFixed(0)} ms · first sight ${firstSight.toFixed(0)} ms\n${caps}`); }
+        return;
+      }
+      t1 = s; gpuDone.length = 0; gpuEnds.length = 0;
+    }
+    fr.push(frameMs); tk.push(b - a); rn.push(c - b);
+    if (now - lastHud > 500) { lastHud = now; say(`${label}: measuring ${(s - t1).toFixed(0)} of 5 s · near ${counts.near} · mid ${counts.mid} · far ${counts.far}\n${caps}`); }
+    if (s - t1 >= 5) finishRow();
+  });
+}
+if (PLAZA) { await plazaRun(); await new Promise(() => {}); }     // nothing below is built for the real plaza
+
+// ---------- the people: parameters, look, where they walk ----------
+const rand = Bd.rng(seed);
+let people = Array.from({ length: N }, () => {
+  const p = Bd.randomParams(rand), hue = rand(), cad = 0.85 + rand() * 0.2;
+  return { p, color: new THREE.Color().setHSL(hue, 0.35 + rand() * 0.3, 0.35 + rand() * 0.25), cad, speed: cad * 1.45 * p[0] * p[1],
+           x: 0, z: 0, h: rand() * Math.PI * 2, ph: rand(), arch: 0, scale: [1, 1, 1] };
+});
+const side = Math.sqrt(N) * (ROOM ? 0.9 : 1.7);     // inside the room: a crowded ballroom, about 1.2 people a square metre
+for (const a of people) { a.x = (rand() - 0.5) * side; a.z = (rand() - 0.5) * side; }
+
+// C1's archetypes: K bodies; each person takes the nearest (all parameters but height, in spreads) and a scale for height and girth
+let archetypes = null;
+if (method === "c1") {
+  const ar = Bd.rng(seed * 7919 + 1);
+  archetypes = Array.from({ length: K }, () => Bd.randomParams(ar));
+  const dist = (a, b) => a.reduce((s, v, j) => j === 0 ? s : s + ((v - b[j]) / Bd.PARAMS[j][2]) ** 2, 0);
+  for (const a of people) {
+    let best = 0; archetypes.forEach((q, k) => { if (dist(a.p, q) < dist(a.p, archetypes[best])) best = k; });
+    a.arch = best; const q = archetypes[best], girth = Math.sqrt(((a.p[5] + a.p[6]) / (q[5] + q[6])));
+    a.scale = [girth, a.p[0] / q[0], girth];
+  }
+  people.sort((a, b) => a.arch - b.arch);           // so each archetype's people are a contiguous run: person = offset + instance
+}
+
+// ---------- per-person data textures (positions, heading, phase updated each frame by the CPU walker) ----------
+const AW = 256, AH = Math.ceil(N / AW);
+const agentData = new Float32Array(AW * AH * 4), lookData = new Float32Array(AW * AH * 4);
+const agentTex = new THREE.DataTexture(agentData, AW, AH, THREE.RGBAFormat, THREE.FloatType);
+const lookTex = new THREE.DataTexture(lookData, AW, AH, THREE.RGBAFormat, THREE.FloatType);   // tint rgb + C1's height scale
+const scaleData = new Float32Array(AW * AH * 4), scaleTex = new THREE.DataTexture(scaleData, AW, AH, THREE.RGBAFormat, THREE.FloatType);
+people.forEach((a, i) => {
+  lookData.set([a.color.r, a.color.g, a.color.b, 1], i * 4); scaleData.set([...a.scale, 0], i * 4);
+});
+for (const t of [agentTex, lookTex, scaleTex]) t.needsUpdate = true;
+const writeAgents = () => { people.forEach((a, i) => { const o = i * 4; agentData[o] = a.x; agentData[o + 1] = a.z; agentData[o + 2] = a.h; agentData[o + 3] = a.ph; }); agentTex.needsUpdate = true; };
+writeAgents();
+
+// the walker: straight lines, turning back at the edges; the phase advances with each person's cadence
+function walk(dt) {
+  const half = side / 2;
+  for (const a of people) {
+    a.x += Math.sin(a.h) * a.speed * dt; a.z += Math.cos(a.h) * a.speed * dt;
+    if (a.x > half || a.x < -half) { a.h = -a.h; a.x = Math.max(-half, Math.min(half, a.x)); }
+    if (a.z > half || a.z < -half) { a.h = Math.PI - a.h; a.z = Math.max(-half, Math.min(half, a.z)); }
+    a.ph = (a.ph + a.cad * dt) % 1;
+    // keep clear of the camera and the near person (eye-level views): turn back on entering the circle
+    for (const [cx, cz] of keepOut) { const dx = a.x - cx, dz = a.z - cz; if (dx * dx + dz * dz < 1.6) { a.h = Math.atan2(dx, dz); a.x = cx + dx * 1.02; a.z = cz + dz * 1.02; } }
+  }
+}
+const keepOut = [];
+
+// ---------- rig textures ----------
+const half16 = (src) => { const o = new Uint16Array(src.length); for (let i = 0; i < src.length; i++) o[i] = THREE.DataUtils.toHalfFloat(src[i]); return o; };
+const filtTex = (data, w, h) => { const t = new THREE.DataTexture(half16(data), w, h, THREE.RGBAFormat, THREE.HalfFloatType);
+  t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; return t; };
+
+// ---------- the bodies per method ----------
+const mean = Bd.buildBody(Bd.MEAN), V = mean.position.length / 3;
+const bytes = {};                                    // crowd data, by what it is
+const geomFrom = (b, copyIndex = true) => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(b.position, 3)); g.setAttribute("normal", new THREE.BufferAttribute(b.normal, 3));
+  g.setAttribute("skinIndex", new THREE.BufferAttribute(b.skinIndex, 4)); g.setAttribute("skinWeight", new THREE.BufferAttribute(b.skinWeight, 4));
+  g.setIndex(new THREE.BufferAttribute(copyIndex ? b.index.slice() : b.index, 1)); return g;
+};
+const geomBytes = g => { let s = 0; for (const a of Object.values(g.attributes)) s += a.array.byteLength; if (g.index) s += g.index.array.byteLength;
+  for (const list of Object.values(g.morphAttributes)) for (const a of list) s += a.count * 16; return s; };   // morphs: three packs one RGBA32F texel per vertex per target
+
+let rigSets;                                       // the rest joints of each rig
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x6b6e72);
+if (INLINE) scene.background.convertLinearToSRGB();   // the clear isn't shaded: give it the display value directly (ACES left out)
+const crowd = new THREE.Group(); scene.add(crowd);
+
+function material(pidNode, rigNode, withScale, rest = null) {
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75 });
+  const rotNode = own_ ? null : texture(rotTex), offNode = own_ ? null : texture(offTex), si = attribute("skinIndex", "uvec4"), sw = attribute("skinWeight", "vec4");
+  const pid = pidNode, ix = pid.mod(int(AW)), iy = pid.div(int(AW));
+  m.colorNode = varying(textureLoad(lookTex, ivec2(ix, iy)).rgb);
+  m.positionNode = Fn(() => {
+    const ag = textureLoad(agentTex, ivec2(ix, iy)).toVar();
+    const r = rest ? rest() : { x: positionLocal, n: normalLocal }, x0 = r.x.toVar(), n0 = r.n.toVar();
+    const fx = ag.w.mul(F).add(0.5).toVar(), rig = rigNode;
+    const offU = own_ ? null : float(rig.mod(int(rig_.perRow))).mul(F + 1).add(fx).div(rig_.offW).toVar();
+    const offRow = own_ ? null : float(rig.div(int(rig_.perRow))).mul(Bd.B).toVar(), rotU = own_ ? null : fx.div(rig_.rotW).toVar();
+    const p = vec3(0).toVar(), n = vec3(0).toVar();
+    if (own_) {
+      // each person's own walk: per bone a quaternion row and an offset row, frames along x, linearly filtered
+      const ownNode = texture(ownTex), pidF = float(pid);
+      const uu = pidF.mod(own_.perRow).mul(F + 1).add(fx).div(own_.W).toVar(), row0 = pidF.div(own_.perRow).floor().mul(Bd.B * 2).toVar();
+      for (const c of ["x", "y", "z", "w"]) {
+        const b = float(si[c]), w = sw[c];
+        const q = ownNode.sample(vec2(uu, row0.add(b.mul(2)).add(0.5).div(own_.H))).level(0).normalize().toVar();
+        const u = ownNode.sample(vec2(uu, row0.add(b.mul(2)).add(1.5).div(own_.H))).level(0).xyz;
+        const tx = cross(q.xyz, x0).mul(2).toVar(), tn = cross(q.xyz, n0).mul(2).toVar();
+        p.addAssign(x0.add(tx.mul(q.w)).add(cross(q.xyz, tx)).add(u).mul(w));
+        n.addAssign(n0.add(tn.mul(q.w)).add(cross(q.xyz, tn)).mul(w));
+      }
+    } else for (const c of ["x", "y", "z", "w"]) {
+      const b = float(si[c]), w = sw[c];
+      const r0 = rotNode.sample(vec2(rotU, b.mul(3).add(0.5).div(rig_.rotH))).level(0).xyz;
+      const r1 = rotNode.sample(vec2(rotU, b.mul(3).add(1.5).div(rig_.rotH))).level(0).xyz;
+      const r2 = rotNode.sample(vec2(rotU, b.mul(3).add(2.5).div(rig_.rotH))).level(0).xyz;
+      const u = offNode.sample(vec2(offU, offRow.add(b).add(0.5).div(rig_.offH))).level(0).xyz;
+      p.addAssign(r0.mul(x0.x).add(r1.mul(x0.y)).add(r2.mul(x0.z)).add(u).mul(w));
+      n.addAssign(r0.mul(n0.x).add(r1.mul(n0.y)).add(r2.mul(n0.z)).mul(w));
+    }
+    let ps = p, ns = n;
+    if (withScale) { const s = textureLoad(scaleTex, ivec2(ix, iy)).xyz; ps = p.mul(s); ns = n.div(s); }
+    const ch = cos(ag.z), sh = sin(ag.z);
+    normalLocal.assign(vec3(ns.x.mul(ch).add(ns.z.mul(sh)), ns.y, ns.z.mul(ch).sub(ns.x.mul(sh))).normalize());
+    return vec3(ps.x.mul(ch).add(ps.z.mul(sh)).add(ag.x), ps.y, ps.z.mul(ch).sub(ps.x.mul(sh)).add(ag.y));
+  })();
+  return m;
+}
+
+let rig_, rotTex, offTex, drawsExpected, vertsPerPerson = V, update = () => {};
+// Own walks: each person's fitted walker, baked once into a texture of quaternions and offsets (walkers.js)
+let own_ = null, ownTex = null, ownMs = 0;
+const Wk = OWN ? await import("./walkers.js") : null, G = OWN ? await import("./gait.js") : null;
+const basis = OWN ? G.loadBasis(await (await fetch(new URL("./gait-basis.json", import.meta.url))).json()) : null;
+function prepareOwn() {
+  if (!OWN) return;
+  const t = performance.now(), wr = Bd.rng(seed * 31 + 7);
+  const walkers = rigSets.map((J, i) => Wk.makeWalker(J, { age: 18 + wr() * 65, sex: wr() < 0.5 ? 1 : -1, seed: seed * 100003 + i }, basis));
+  walkers.forEach((w, i) => { people[i].speed = w.v; people[i].cad = w.f; });
+  own_ = Wk.bakeOwn(walkers, F); ownTex = filtTex(own_.data, own_.W, own_.H);
+  bytes.ownWalks = own_.W * own_.H * 8; ownMs = performance.now() - t;
+}
+const linearJoints = (dirs, c) => mean.joints.J.map((j, b) => j.map((v, a) => v + dirs.reduce((s, d, t) => s + c[t] * d[b][a], 0)));
+
+if (method === "c1") {
+  const bodies = archetypes.map(q => Bd.buildBody(q));
+  rigSets = bodies.map(b => b.joints.J);
+  rig_ = Bd.bakeRig(rigSets, F); rotTex = filtTex(rig_.rot, rig_.rotW, rig_.rotH); offTex = filtTex(rig_.off, rig_.offW, rig_.offH);
+  let offset = 0; bytes.meshes = 0;
+  bodies.forEach((b, k) => {
+    const count = people.filter(a => a.arch === k).length; if (!count) return;
+    const g = geomFrom(b); bytes.meshes += geomBytes(g);
+    const mesh = new THREE.Mesh(g, material(int(instanceIndex).add(int(uniform(offset, "int"))), int(uniform(k, "int")), true));
+    mesh.count = count; mesh.frustumCulled = false; crowd.add(mesh); offset += count;
+  });
+  drawsExpected = crowd.children.length;
+} else if (method === "c2" || method === "c2b") {
+  const g = geomFrom(mean, false), deltas = [], jdirs = [];
+  for (let t = 0; t < KT; t++) {
+    const q = Bd.MEAN.slice(); q[t] += Bd.PARAMS[t][2]; const b = Bd.buildBody(q), d = new Float32Array(b.position.length);
+    for (let i = 0; i < d.length; i++) d[i] = b.position[i] - mean.position[i];
+    deltas.push(new THREE.BufferAttribute(d, 3)); jdirs.push(b.joints.J.map((j, bi) => j.map((v, a) => v - mean.joints.J[bi][a])));
+  }
+  g.morphAttributes.position = deltas; g.morphTargetsRelative = true;
+  const coef = people.map(a => Array.from({ length: KT }, (_, t) => (a.p[t] - Bd.MEAN[t]) / Bd.PARAMS[t][2]));
+  const mt = new Float32Array((KT + 1) * N); coef.forEach((c, i) => c.forEach((v, t) => { mt[i * (KT + 1) + t + 1] = v; }));
+  const morphTexture = new THREE.DataTexture(mt, KT + 1, N, THREE.RedFormat, THREE.FloatType); morphTexture.needsUpdate = true;
+  bytes.mesh = geomBytes(g); bytes.morphTexture = mt.byteLength;
+  if (method === "c2") {
+    rigSets = coef.map(c => linearJoints(jdirs, c));
+    rig_ = Bd.bakeRig(rigSets, F); rotTex = filtTex(rig_.rot, rig_.rotW, rig_.rotH); offTex = filtTex(rig_.off, rig_.offW, rig_.offH);
+    const mesh = new THREE.Mesh(g, material(int(instanceIndex), int(instanceIndex), false));
+    // r186: a Mesh gets morphTargetInfluences from its constructor; with count > 1 the shader reads only morphTexture, the influences
+    // uniform array is never built, and its per-object update then throws (null buffer). InstancedMesh has none, so we drop it too.
+    mesh.morphTargetInfluences = undefined; mesh.count = N; mesh.morphTexture = morphTexture; mesh.frustumCulled = false; crowd.add(mesh);
+  } else {
+    // three's own path: SkinnedMesh + morph targets + the instancing hack from examples/webgpu_skinning_instancing.html
+    const bones = Bd.BONES.map(() => new THREE.Bone()), J = mean.joints.J;
+    Bd.BONES.forEach(([, pa], b) => { const o = pa < 0 ? J[b] : J[b].map((v, a) => v - J[pa][a]); bones[b].position.set(...o); if (pa >= 0) bones[pa].add(bones[b]); });
+    const mesh = new THREE.SkinnedMesh(g, new THREE.MeshStandardNodeMaterial({ roughness: 0.75 }));
+    mesh.add(bones[0]); mesh.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton(bones));
+    mesh.morphTargetInfluences = undefined; mesh.isInstancedMesh = true; mesh.count = N; mesh.morphTexture = morphTexture; mesh.frustumCulled = false;
+    mesh.instanceMatrix = new THREE.InstancedBufferAttribute(new Float32Array(N * 16), 16);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(people.flatMap(a => [a.color.r, a.color.g, a.color.b])), 3);
+    crowd.add(mesh);
+    const m4 = new THREE.Matrix4(), qy = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3(), e = new THREE.Euler();
+    let clock = 0;
+    update = (dt) => {   // one shared pose: the gait at one global phase
+      clock = (clock + dt * 0.95) % 1;
+      for (let b = 0; b < Bd.B; b++) { e.set(...Bd.localEulerAt(b, clock), "YXZ"); bones[b].quaternion.setFromEuler(e); }
+      bones[0].position.set(J[0][0], J[0][1] - 0.008 * J[0][1] + 0.022 * J[0][1] * Math.cos(4 * Math.PI * clock), J[0][2]);
+      people.forEach((a, i) => { qy.setFromAxisAngle(up, a.h); m4.compose(at.set(a.x, 0, a.z), qy, one); m4.toArray(mesh.instanceMatrix.array, i * 16); });
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    bytes.instanceMatrix = N * 64; bytes.instanceColor = N * 12;
+  }
+  drawsExpected = 1;
+} else if (method === "c2c") {
+  // C2 with our own morph: coefficients as four instanced vec4 attributes (no per-vertex texture read for them), deltas in one
+  // RGBA16F texture (8 B per vertex per target, three's own path uses RGBA32F), an unconditional loop
+  const g = geomFrom(mean, false), dW = 2048, dH = Math.ceil(V * KT / dW), dd = new Float32Array(dW * dH * 4), jdirs = [];
+  for (let t = 0; t < KT; t++) {
+    const q = Bd.MEAN.slice(); q[t] += Bd.PARAMS[t][2]; const b = Bd.buildBody(q);
+    for (let v = 0; v < V; v++) for (let a = 0; a < 3; a++) dd[(t * V + v) * 4 + a] = b.position[v * 3 + a] - mean.position[v * 3 + a];
+    jdirs.push(b.joints.J.map((j, bi) => j.map((x, a) => x - mean.joints.J[bi][a])));
+  }
+  const deltaTex = new THREE.DataTexture(half16(dd), dW, dH, THREE.RGBAFormat, THREE.HalfFloatType); deltaTex.needsUpdate = true;
+  const coef = people.map(a => Array.from({ length: 16 }, (_, t) => t < KT ? (a.p[t] - Bd.MEAN[t]) / Bd.PARAMS[t][2] : 0));
+  for (let c = 0; c < 4; c++) g.setAttribute("coef" + c, new THREE.InstancedBufferAttribute(new Float32Array(coef.flatMap(cs => cs.slice(c * 4, c * 4 + 4))), 4));
+  rigSets = coef.map(c => linearJoints(jdirs, c.slice(0, KT)));
+  if (OWN) prepareOwn();
+  else { rig_ = Bd.bakeRig(rigSets, F); rotTex = filtTex(rig_.rot, rig_.rotW, rig_.rotH); offTex = filtTex(rig_.off, rig_.offW, rig_.offH); }
+  const rest = () => {
+    const x = positionLocal.toVar(), vi = int(vertexIndex);
+    for (let t = 0; t < KT; t++) {
+      const gi = vi.add(t * V), c = attribute("coef" + (t >> 2), "vec4")[["x", "y", "z", "w"][t & 3]];
+      x.addAssign(textureLoad(deltaTex, ivec2(gi.mod(dW), gi.div(dW))).xyz.mul(c));
+    }
+    return { x, n: normalLocal };
+  };
+  const mesh = new THREE.Mesh(g, material(int(instanceIndex), int(instanceIndex), false, rest));
+  mesh.count = N; mesh.frustumCulled = false; crowd.add(mesh);
+  bytes.mesh = geomBytes(g) - N * 64; bytes.coefficients = N * 64; bytes.deltaTexture = dW * dH * 8;
+  drawsExpected = 1;
+} else if (method === "c3t") {
+  // C3's unique rest shapes without C3's waste: the template mesh drawn instanced (one index buffer, one set of skin attributes),
+  // each instance's own rest positions and normals read from an RGBA16F texture at instance * V + vertex
+  const bodies = people.map(a => Bd.buildBody(a.p)), W = 2048, texels = N * V * 2, H = Math.ceil(texels / W), rd = new Float32Array(W * H * 4);
+  bodies.forEach((b, i) => { for (let v = 0; v < V; v++) { const o = ((i * V + v) * 2) * 4;
+    rd[o] = b.position[v * 3]; rd[o + 1] = b.position[v * 3 + 1]; rd[o + 2] = b.position[v * 3 + 2];
+    rd[o + 4] = b.normal[v * 3]; rd[o + 5] = b.normal[v * 3 + 1]; rd[o + 6] = b.normal[v * 3 + 2]; } });
+  const restTex = new THREE.DataTexture(half16(rd), W, H, THREE.RGBAFormat, THREE.HalfFloatType); restTex.needsUpdate = true;
+  rigSets = bodies.map(b => b.joints.J);
+  if (OWN) prepareOwn();
+  else { rig_ = Bd.bakeRig(rigSets, F); rotTex = filtTex(rig_.rot, rig_.rotW, rig_.rotH); offTex = filtTex(rig_.off, rig_.offW, rig_.offH); }
+  const rest = () => {
+    const gi = int(instanceIndex).mul(V).add(int(vertexIndex)).mul(2).toVar();
+    return { x: textureLoad(restTex, ivec2(gi.mod(W), gi.div(W))).xyz, n: textureLoad(restTex, ivec2(gi.add(1).mod(W), gi.add(1).div(W))).xyz };
+  };
+  const g = geomFrom(mean, false);
+  const mesh = new THREE.Mesh(g, material(int(instanceIndex), int(instanceIndex), false, rest));
+  mesh.count = N; mesh.frustumCulled = false; crowd.add(mesh);
+  bytes.template = geomBytes(g); bytes.restTexture = W * H * 8;
+  drawsExpected = 1;
+} else if (method === "c3") {
+  const bodies = people.map(a => Bd.buildBody(a.p));
+  rigSets = bodies.map(b => b.joints.J);
+  rig_ = Bd.bakeRig(rigSets, F); rotTex = filtTex(rig_.rot, rig_.rotW, rig_.rotH); offTex = filtTex(rig_.off, rig_.offW, rig_.offH);
+  const pos = new Float32Array(N * V * 3), nor = new Float32Array(N * V * 3), si = new Uint16Array(N * V * 4), sw = new Float32Array(N * V * 4);
+  const IC = mean.index.length, idx = new Uint32Array(N * IC);
+  bodies.forEach((b, i) => {
+    pos.set(b.position, i * V * 3); nor.set(b.normal, i * V * 3); si.set(b.skinIndex, i * V * 4); sw.set(b.skinWeight, i * V * 4);
+    for (let j = 0; j < IC; j++) idx[i * IC + j] = b.index[j] + i * V;
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  g.setAttribute("skinIndex", new THREE.BufferAttribute(si, 4)); g.setAttribute("skinWeight", new THREE.BufferAttribute(sw, 4));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  bytes.mergedMesh = geomBytes(g);
+  const mesh = new THREE.Mesh(g, material(int(vertexIndex).div(int(V)), int(vertexIndex).div(int(V)), false));
+  mesh.frustumCulled = false; crowd.add(mesh);
+  drawsExpected = 1;
+}
+if (rig_) { bytes.rigShared = rig_.rotW * rig_.rotH * 8; bytes.rigPerBody = rig_.offW * rig_.offH * 8; }
+bytes.perPerson = agentData.byteLength + lookData.byteLength + (method === "c1" ? scaleData.byteLength : 0);
+const crowdBytes = Object.values(bytes).reduce((s, v) => s + v, 0);
+crowd.traverse(o => { if (o.isMesh) o.castShadow = true; });
+
+// ---------- the studio (the bench's light, simplified) ----------
+const key = new THREE.DirectionalLight(0xfff1e0, 2.6); key.position.set(side * 0.3, side * 0.6, side * 0.4); key.castShadow = SHADOWS;
+if (SHADOWS) { key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -side * 0.75, right: side * 0.75, top: side * 0.75, bottom: -side * 0.75, near: 0.5, far: side * 2 }); }
+scene.add(key, new THREE.HemisphereLight(0xdde6f0, 0x4a4440, 1.1));
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(side * 1.6, side * 1.6), new THREE.MeshStandardNodeMaterial({ color: 0x7a7c80, roughness: 0.95 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 400);
+if (Q.get("view") === "close") { camera.position.set(0, 1.5, 7); camera.lookAt(0, 0.9, 0); }
+else if (NEAR || ROOM) { camera.position.set(0, 1.6, side / 2 + 0.6); camera.lookAt(0, 1.35, side / 2 - 6); keepOut.push([0, side / 2 + 0.6], [0, side / 2 - 2]); }   // eye height at the edge, looking in
+else { camera.position.set(0, side * 0.5, side * 1.05); camera.lookAt(0, 0, -side * 0.02); }
+// One near person: MakeHuman base with its base layer, skin, eyes and long hair (spikes/appearance, spikes/hair),
+// 2.6 m from the camera, facing it: conversation distance in the world view.
+let near = null, nearMs = 0, nearHair = null;
+if (NEAR) {
+  const t = performance.now();
+  const Hm = await import("./spikes/hair/index.js");
+  near = Hm.build(THREE, renderer, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42, hair: { style: "long" } }, FLAGS.includes("hairmid") ? "mid" : "near");   // long and loose: the costliest hair
+  if (FLAGS.includes("hairmid")) near.children[0].material = (await import("./spikes/appearance/skin.js")).skinMaterial(THREE, "near");   // her near skin, the mid tier's cards
+  // her hair taken apart (fourth run): how the cards cover, what they cost to shade, and when they are drawn
+  const cards = [];
+  near.traverse(o => { if (o.isMesh && o.name === "hair-cards") cards.push(o); });
+  for (const m of cards) {
+    const o = m.material;
+    if (FLAGS.includes("hairtest")) { const c = o.clone(); c.alphaToCoverage = false; c.alphaTest = 0.5; m.material = c; }
+    if (FLAGS.includes("hairopaque")) { const c = o.clone(); c.alphaToCoverage = false; c.alphaTest = 0; c.transparent = false; c.opacityNode = THREE.TSL.float(1); m.material = c; }
+    if (FLAGS.includes("hairflat")) { const c = new THREE.MeshBasicNodeMaterial({ color: "#3a2a20", side: THREE.DoubleSide }); c.positionNode = o.positionNode;
+      c.opacityNode = o.opacityNode; c.alphaToCoverage = o.alphaToCoverage; c.transparent = o.transparent; c.depthWrite = true; m.material = c; }
+    if (FLAGS.includes("hairlast")) m.renderOrder = 2;
+    if (FLAGS.includes("hairfirst")) m.renderOrder = -2;
+  }
+  if (FLAGS.includes("bald")) near.traverse(o => { if (/^hair/.test(o.name)) o.visible = false; });   // the cost check only: never a look
+  // cost checks on her skin (Kabe's one-run benchmark, 2026-10-12: her cost is per pixel of her body, not her hair):
+  // skinmid / skinfar swap the skin's tier, skinflat a plain material; the base layer stays on in every one
+  const skinTier = FLAGS.find(f => /^skin(mid|far)$/.test(f));
+  if (skinTier) near.children[0].material = (await import("./spikes/appearance/skin.js")).skinMaterial(THREE, skinTier.slice(4));
+  if (FLAGS.includes("layerfirst")) near.traverse(o => { if (o.name === "base-layer" || /^hair/.test(o.name)) o.renderOrder = -1; });   // occluders first: early depth rejects the skin under them
+  if (FLAGS.includes("nofringe")) near.traverse(o => { if (o.name === "hair-fringe") o.visible = false; });   // the blended second hair pass
+  if (FLAGS.includes("skinflat")) near.children[0].material = new THREE.MeshStandardNodeMaterial({ color: "#c99a74", roughness: 0.55 });
+  // mhbob, mhlong, ...: one of the hairstyle lineup's shells (spikes/mhhair) in place of her grown hair
+  const mh = FLAGS.find(f => /^mh[a-z]+$/.test(f));
+  if (mh) {
+    near.traverse(o => { if (o.name === "hair-cards") o.visible = false; });   // her grown cards out (the base layer stays)
+    const M = await import("./spikes/mhhair/index.js"), st = (await M.loadStyles(THREE, [mh.slice(2)]))[mh.slice(2)];
+    M.wear(THREE, renderer, st, near, { age: 30, sex: 0, height: 1.66, build: 0.5, skin: "#c99a74", seed: 42 }, { tip: "#4a3020" });
+  }
+  // skinbake: her procedural skin drawn once into her own 2048 texture (spikes/appearance/bake.js), the near material reading it
+  if (FLAGS.includes("skinbake")) { const B = await import("./spikes/appearance/bake.js"); const k = await B.bakeSkin(THREE, renderer, near); B.releaseBakeScratch(THREE); console.log(`skinbake: ${k.ms.toFixed(0)} ms, ${(k.bytes / 1e6).toFixed(1)} MB`); }
+  near.position.set(0, 0, side / 2 + 0.6 - 2.6); scene.add(near); nearHair = Hm.moveHair; nearMs = performance.now() - t;
+}
+addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+if (Q.get("view") === "close") { people.forEach((a, i) => { if (i < 12) { a.x = (i % 6 - 2.5) * 1.1; a.z = Math.floor(i / 6) * -2.2; a.h = i % 2 ? 0.6 : -0.6; a.speed = 0; } else a.z = Math.min(a.z, 0) - 8; }); }
+const buildMs = performance.now() - tBuild0;
+
+// ---------- the loop and its measures ----------
+const tFirst = performance.now(); walk(0); update(0); writeAgents(); renderer.render(scene, camera); const firstFrameMs = performance.now() - tFirst;
+const draws = renderer.info.render.drawCalls, triangles = renderer.info.render.triangles;
+let last = performance.now(), gpuLast = null;
+const win = { frame: [], upd: [], rnd: [] }, all = { frame: [], upd: [], rnd: [] };
+let phase = RUN ? "warm" : "free", t0 = performance.now(), lastHud = 0;
+const resolveGpu = () => renderer.resolveTimestampsAsync("render").then(v => { if (v) gpuLast = v; }).catch(() => {});
+const mb = b => (b / 1048576).toFixed(2) + " MB";
+
+function frame() {
+  const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), frameMs = now - last; last = now;
+  const a = performance.now(); walk(dt); update(dt); writeAgents(); if (near && !FLAGS.includes("still")) nearHair(near, dt); const b = performance.now();
+  renderer.render(scene, camera); if (SYNC) syncGpu(); const c = performance.now();
+  if (Q.get("gpu") !== "0" && phase !== "gpu") resolveGpu();
+  win.frame.push(frameMs); win.upd.push(b - a); win.rnd.push(c - b);
+  if (phase === "timed") { all.frame.push(frameMs); all.upd.push(b - a); all.rnd.push(c - b); }
+  if (SUITE || SUSTAIN) { r9(now, frameMs, b - a, c - b); if (r9done) return; }
+  if (phase === "warm" && now - t0 > 2000) { phase = "timed"; t0 = now; }
+  else if (phase === "timed" && now - t0 > 5000) { phase = "gpu"; renderer.setAnimationLoop(null); finish(); }
+  if (now - lastHud > 500) {
+    lastHud = now;
+    say(`${method} · ${backend} · ${N} people · ${vertsPerPerson.toLocaleString()} verts each · ${draws} draw${draws === 1 ? "" : "s"} (${drawsExpected} crowd) · ${Math.round(triangles).toLocaleString()} tris\n` +
+        `frame ${mean_(win.frame).toFixed(2)} ms (${(1000 / mean_(win.frame)).toFixed(0)} fps) · cpu walk ${mean_(win.upd).toFixed(2)} ms · render() ${mean_(win.rnd).toFixed(2)} ms · gpu ${gpuLast == null ? "n/a" : gpuLast.toFixed(2) + " ms"}\n` +
+        `crowd data ${mb(crowdBytes)} · gpu memory (three's count) ${mb(renderer.info.memory.total || 0)} · built in ${buildMs.toFixed(0)} ms · first frame ${firstFrameMs.toFixed(0)} ms\n` +
+        (STAGE === "ramp" ? `benchmarks 1 of 3, the ramp: ${VARIANTS[+SUITE.split(".")[0]][0]}, ${N} people\n` : STAGE === "sustain" ? `benchmarks 2 of 3, ten minutes at 300: ${Math.max(0, 10 - minutes.length)} min left\n` : STAGE === "warm" ? `benchmarks 3 of 3, 300 again on a warm phone: ${VARIANTS[WARM[+SUITE.slice(1)]][0]}\n` : SUSTAIN ? `ten minutes: keep the screen on\n` : "") +
+        sameText + "\n" + (OWN ? `own walks baked in ${ownMs.toFixed(0)} ms · ` : "") + (NEAR ? `near person built in ${nearMs.toFixed(0)} ms · ` : "") +
+        `asked for ${P.webgl === "1" ? "WebGL2" : "WebGPU"}, running ${backend} · ${caps.split(" · ").slice(0, 2).join(" · ")}` + (lastErr && backend !== "webgpu" ? `\nlast WebGPU error: ${lastErr}` : "") + (RUN ? `\nmeasuring: ${phase}` : ""));
+    win.frame.length = win.upd.length = win.rnd.length = 0;
+  }
+  if (SHOT && !window.__shot && now - tFirst > 1500) window.__shot = true;
+}
+if (!SUITE) runSame();
+
+// ---------- R9: the ramp suite and the ten-minute run ----------
+let r9done = false, r9t0 = null, r9t1 = null, r9frames = [], r9cpu = [], r9rnd = [], minutes = [], settle = [];
+function advance(v, st) {     // the next step of the ramp, the next variant, or the end
+  if (st + 1 < VARIANTS[v][2].length) return suiteGo(v, st + 1);
+  if (v + 1 < VARIANTS.length) return suiteGo(v + 1, 0);
+  return LONG ? sustainGo() : finishAll();
+}
+function r9(now, frameMs, cpuMs, rndMs) {
+  if (r9t0 === null) r9t0 = now;
+  const t = (now - r9t0) / 1000;
+  if (STAGE === "ramp" || STAGE === "warm") {
+    // warm-up: on a phone a reload goes on building, compiling and uploading for seconds after the first frame, so the
+    // window opens only once frames have settled (the last half second's median within 15% of the half second before),
+    // at least 4 s in and at most 15 s; then 5 s are measured
+    if (r9t1 === null) {
+      settle.push(frameMs);
+      if (t < 4) return;
+      const n = settle.length, med = (a) => pct(a, 0.5);
+      const k = Math.max(10, Math.round(500 / Math.max(1, med(settle.slice(-20)))));
+      if (t < 15 && (n < 2 * k || Math.abs(med(settle.slice(n - 2 * k, n - k)) - med(settle.slice(n - k))) > 0.15 * med(settle.slice(n - k)))) return;
+      r9t1 = t;
+    }
+    if (!r9frames.length) { gpuDone.length = 0; gpuEnds.length = 0; }
+    r9frames.push(frameMs); r9cpu.push(cpuMs); r9rnd.push(rndMs);
+    if (t - r9t1 < 5) return;
+    r9done = true; renderer.setAnimationLoop(null);
+    const sf = stats(r9frames), row = { n: N, ...sf, settledAt: +r9t1.toFixed(1), cpu: +mean_(r9cpu).toFixed(2), render: +mean_(r9rnd).toFixed(2),
+      mem: +((renderer.info.memory.total || 0) / 1048576).toFixed(1), build: Math.round(buildMs), walkBake: Math.round(ownMs), near: Math.round(nearMs), backend,
+      ...(gpuEnds.length >= 3 ? { gpuDone: gpuFrame() } : {}), ...(FLAGS.includes("wgpu") && backend !== "webgpu" && lastErr ? { err: lastErr.slice(0, 120) } : {}) };
+    const b = store.all();
+    if (STAGE === "warm") {
+      const k = +SUITE.slice(1); (b.warm ||= []).push({ v: WARM[k], name: VARIANTS[WARM[k]][0], ...row }); store.save(b);
+      return k + 1 < WARM.length ? warmGo(k + 1) : finishAll();
+    }
+    const [v, st] = SUITE.split(".").map(Number);
+    b.rows.push({ v, name: VARIANTS[v][0], ...row }); store.save(b);
+    return advance(v, st);
+  }
+  // sustain: ten minutes at 300, a row a minute
+  r9frames.push(frameMs);
+  if (t >= (minutes.length + 1) * (QUICK.length ? 3 : 60)) { minutes.push({ minute: minutes.length + 1, ...stats(r9frames), long: r9frames.filter(x => x > 50).length }); r9frames = []; }
+  if (minutes.length === 10 && STAGE === "sustain") {
+    r9done = true; renderer.setAnimationLoop(null);
+    const b = store.all(); b.sustain = minutes; store.save(b);
+    return warmGo(0);
+  }
+  if (minutes.length === 10) {
+    r9done = true; renderer.setAnimationLoop(null);
+    say(`R9 ten minutes · ${N} people, own walks, near person, inside the room · ${device}\n` +
+      minutes.map(m => `minute ${String(m.minute).padStart(2)}: median ${m.median} ms, slowest 5% ${m.p95} ms, frames over 50 ms ${m.long}`).join("\n") +
+      `\nfirst minute → tenth: median ${minutes[0].median} → ${minutes[9].median} ms`);
+  } else if (Math.floor(t) % 5 === 0) document.title = `R9 ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+}
+// The people layer on this CPU: 300 walking in a 30 m square to hashed destinations in turn, ticked at 60 Hz with
+// avoidance off and on (src/people/population.js; no drawing), 10 s each after a warm-up. Avoiding and bumping
+// (Kabe, 2026-10-12) cost about 1.4 ms a tick on the desktop; this is that cost here.
+async function peopleBench() {
+  const [{ makePopulation }, { loadBasis }, { uniform }] = await Promise.all([import("./people/population.js"), import("./gait.js"), import("./traits/stream.js")]);
+  const basis = loadBasis(await (await fetch(new URL("./gait-basis.json", import.meta.url))).json());
+  const out = {};
+  for (const avoid of [false, true]) {
+    const p = makePopulation({ basis, avoid }), trips = new Map();
+    const dest = (id) => { const k = (trips.get(id) ?? 0) + 1; trips.set(id, k); return [(uniform(1, id, "x" + k) - 0.5) * 30, 0, (uniform(1, id, "z" + k) - 0.5) * 30]; };
+    for (let i = 0; i < 300; i++) { const id = "p" + i; p.add({ id, recipe: "", at: { pos: [(uniform(2, id, "x") - 0.5) * 30, 0, (uniform(2, id, "z") - 0.5) * 30] } }); p.goTo(id, { pos: dest(id) }); }
+    // Safari's clock steps in whole milliseconds, so each sample is 60 ticks timed together, divided by 60
+    const ts = [];
+    for (let g = 0; g < 11; g++) {
+      const t = performance.now();
+      for (let f = g * 60; f < (g + 1) * 60; f++) {
+        p.tick(f / 60, 1 / 60, null);
+        for (const e of p.events()) if (e.type === "arrived") p.goTo(e.id, { pos: dest(e.id) });
+      }
+      if (g > 0) ts.push((performance.now() - t) / 60);                      // the first second is the warm-up
+      await new Promise(r => setTimeout(r, 0));                                // let the page breathe
+    }
+    out[avoid ? "on" : "off"] = { median: +pct(ts, 0.5).toFixed(2), p95: +pct(ts, 0.95).toFixed(2) };
+  }
+  return `people layer, 300 walking (CPU a tick, median / slowest 5%): avoidance off ${out.off.median} / ${out.off.p95} ms, on ${out.on.median} / ${out.on.p95} ms`;
+}
+// The end of the run: the digest and the people layer's CPU (each once, here), then the report.
+async function finishAll() {
+  const b = store.all();
+  say("benchmarks: last checks (about 20 s)…");
+  b.digest = await runSame();
+  try { b.people = await peopleBench(); } catch (e) { b.people = "people layer: could not run (" + (e && e.message || e) + ")"; }
+  b.device = device; b.done = Date.now(); store.save(b);
+  report(b);
+}
+function reportText(b) {
+  const L = [`Photonic benchmarks · ${b.device} · ${b.started ? Math.round((b.done - b.started) / 60000) + " min" : ""}`, b.digest, b.people, "",
+    "Each variant at fixed counts: people: median / slowest 5% ms, render() ms (GPU-synced: render() is the whole GPU frame)"];
+  VARIANTS.forEach(([name], v) => {
+    if (b.fixed) { L.push(`· ${name}: ` + b.rows.filter(x => x.v === v).map(x => `${x.n}: ${x.median} / ${x.p95}, render() ${x.render}` + (x.gpuDone !== undefined ? `, GPU done ${x.gpuDone}` : "") + (x.counts ? `, people tick ${x.cpu}, loading ${x.loading ?? "?"} ms, first sight ${x.build} ms, near ${x.counts.near} mid ${x.counts.mid} far ${x.counts.far}` : "") + (x.backend ? ` [${x.backend}]` : "") + (x.err ? ` (WebGPU failed: ${x.err})` : "")).join(" · ")); return; }
+    const r = b.rows.filter(x => x.v === v), ok = r.filter(x => x.median <= 34), best = ok[ok.length - 1], at300 = r.find(x => x.n === 300), first = r[0];
+    L.push(`· ${name}: ${best ? best.n : "under 100"}` + (best ? ` (median ${best.median}, slowest 5% ${best.p95} ms)` : first ? ` (at ${first.n}: median ${first.median} ms, cpu ${first.cpu}, render() ${first.render})` : ""));
+    if (SYNCED[v]) L.push(`    GPU-synced render() by people: ${r.map(x => `${x.n}:${x.render}`).join(" ")} ms`);
+    if (at300) L.push(`    at 300: median ${at300.median}, slowest 5% ${at300.p95} ms · cpu ${at300.cpu} · render() ${at300.render} ms · gpu memory ${at300.mem} MB · built in ${at300.build} ms`);
+  });
+  if (b.sustain) {
+    L.push("", "TEN MINUTES at 300, own walks + near person + room:");
+    for (const m of b.sustain) L.push(`  minute ${String(m.minute).padStart(2)}: median ${m.median}, slowest 5% ${m.p95} ms, frames over 50 ms ${m.long}`);
+  }
+  if (b.warm?.length) {
+    L.push("", "300 AGAIN, warm phone (against the cool ramp):");
+    for (const w of b.warm) { const cool = b.rows.find(x => x.v === w.v && x.n === 300); L.push(`· ${w.name}: median ${w.median}, slowest 5% ${w.p95} ms · cpu ${w.cpu} · render() ${w.render}` + (cool ? ` (cool: ${cool.median} ms)` : "")); }
+  }
+  if (!b.fixed) L.push("", "every ramp step (variant/people:median ms@settled s): " + b.rows.map(x => `${x.v}/${x.n}:${x.median}@${x.settledAt}`).join(" "));
+  return L.join("\n");
+}
+function report(b) {
+  const text = reportText(b), json = JSON.stringify({ device: b.device, rows: b.rows, sustain: b.sustain, warm: b.warm, digest: b.digest, people: b.people });
+  say("DONE. Tap Send results (or Copy results and paste them to Claude).\n" + text);
+  nav.replaceChildren();
+  const send = document.createElement("a"); send.textContent = "Send results"; send.className = "on";
+  const issue = (body) => "https://github.com/5000Stadia/photonic-phone-test/issues/new?title=" + encodeURIComponent("Benchmarks: " + b.device) + "&body=" + encodeURIComponent(body);
+  send.href = issue("```\n" + text + "\n```\n\n<details><summary>data</summary>\n\n```json\n" + json + "\n```\n</details>");
+  if (send.href.length > 7500) send.href = issue("```\n" + text + "\n```");          // a link GitHub takes: the report alone
+  send.target = "_blank"; send.rel = "noopener";
+  const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy results";
+  copy.addEventListener("click", () => navigator.clipboard.writeText(text + "\n\n" + json).then(() => { copy.textContent = "Copied"; }, () => { copy.textContent = "Copy failed: screenshot instead"; }));
+  const again = document.createElement("button"); again.type = "button"; again.textContent = "Run again"; again.addEventListener("click", startAll);
+  for (const el of [send, copy, again]) nav.append(el);
+}
+renderer.setAnimationLoop(frame);
+
+async function finish() {
+  const gpu = [], cpuIso = [];   // render() CPU ms on frames drawn one at a time (no backlog for the driver to block on)
+  if (Q.get("gpu") !== "0") {
+    await Promise.race([resolveGpu(), new Promise(r => setTimeout(r, 500))]);
+    for (let i = 0; i < 40; i++) {
+      walk(1 / 60); update(1 / 60); writeAgents(); const c0 = performance.now(); renderer.render(scene, camera); cpuIso.push(performance.now() - c0);
+      const v = await Promise.race([renderer.resolveTimestampsAsync("render"), new Promise(r => setTimeout(() => r(null), 1000))]);
+      if (v) gpu.push(v);
+    }
+  }
+  const info = renderer.backend.isWebGPUBackend ? renderer.backend.device?.adapterInfo : null;
+  window.__result = {
+    method, backend, n: N, k: method.startsWith("c2") ? KT : null, K: method === "c1" ? K : null, verts_per_person: V, draws, crowd_draws: drawsExpected,
+    triangles: Math.round(triangles), frames: all.frame.length,
+    frame_mean_ms: +mean_(all.frame).toFixed(3), frame_p50_ms: +pct(all.frame, 0.5).toFixed(3), frame_p99_ms: +pct(all.frame, 0.99).toFixed(3),
+    cpu_walk_ms: +mean_(all.upd).toFixed(4), cpu_render_ms: +mean_(all.rnd).toFixed(3), cpu_render_isolated_ms: cpuIso.length ? +pct(cpuIso, 0.5).toFixed(3) : null,
+    gpu_ms: gpu.length ? +pct(gpu, 0.5).toFixed(3) : null, gpu_samples: gpu.length,
+    crowd_bytes: crowdBytes, bytes, three_memory: { ...renderer.info.memory },
+    build_ms: Math.round(buildMs), first_frame_ms: Math.round(firstFrameMs), shadows: SHADOWS, adapter: info ? `${info.vendor} ${info.architecture}` : null,
+    buffer: [renderer.domElement.width, renderer.domElement.height],
+  };
+  say(hud.textContent + "\n" + JSON.stringify(window.__result));
+}

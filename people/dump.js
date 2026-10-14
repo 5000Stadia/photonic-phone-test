@@ -30,9 +30,14 @@ function destination(target) {
  */
 export function dumpPeople(records) {
   return [...records].sort((a, b) => compare(a.id, b.id)).map(rec => {
-    const garments = rec.garments().map(g => `${atom(g.kind)}:${Object.keys(g.aspects).sort().map(k => `${atom(k)}=${atom(g.aspects[k])}`).join(",")}`).sort(compare);
+    const attire = rec.attire;
+    const stated = [...attire.garments];
+    if (!stated.some(g => g.kind === "shift")) stated.push(rec.garments().find(g => g.kind === "shift"));
+    const gaps = [...attire.notDrawn, ...attire.drawn.filter(g => g.as !== g.kind)];
+    const notDrawn = gaps.length ? `; notDrawn=[${gaps.map(g => atom(g.kind)).sort(compare).join(",")}]` : "";
+    const garments = stated.map(g => `${atom(g.kind)}:${Object.keys(g.aspects).sort().map(k => `${atom(k)}=${atom(g.aspects[k])}`).join(",")}`).sort(compare);
     const activity = rec.doing?.verb === "goTo" ? `walking destination=${destination(rec.doing.target)}`
       : rec.doing?.verb === "sit" ? "sitting" : "standing";
-    return `${value(rec.id)}; recipe=${value(rec.res.recipe.said)}; seed=${value(rec.seed)}; room=${value(rec.room)}; position=${vector(rec.pos)}; facing=${decimal(rec.heading)}; ${activity}; garments=[${garments.join("|")}]; hair=${value(rec.hair.style)}:${vector(rec.hair.colour)}`;
+    return `${value(rec.id)}; recipe=${value(rec.res.recipe.said)}; seed=${value(rec.seed)}; room=${value(rec.room)}; position=${vector(rec.pos)}; facing=${decimal(rec.heading)}; ${activity}; garments=[${garments.join("|")}]${notDrawn}; hair=${value(rec.hair.style)}:${vector(rec.hair.colour)}`;
   }).join("\n");
 }

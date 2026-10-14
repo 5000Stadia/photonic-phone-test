@@ -3,8 +3,8 @@
 //
 //   1. A garment of a kind we do not have (a cloak, a hat, or any name we never made) is NOT DRAWN, and reported. So is a kind that is not a kind name.
 //   2. Two garments in one slot cannot both be drawn: the OUTERMOST wins (the higher layer; equal layers, the one listed last, put on last). Two bodices, a skirt over breeches: reported as a conflict.
-//   3. The torso and legs garments that remain choose the CLASS: one of the four outfit packages (gentlewoman, workwoman, gentleman, workman), which is what the draws are keyed by (with the wear mask:
-//      the torso garment is bit 0, the legs garment bit 1). The package that draws the most of them as they are, torso first, if the body is old enough for it. A garment its package does not draw
+//   3. The garments that remain choose the CLASS: one of the four outfit packages (gentlewoman, workwoman, gentleman, workman), which is what the draws are keyed by (with the wear mask:
+//      the torso garment is bit 0, the legs garment bit 1). The package that draws the most of them exactly across every slot, preferring the previous package on a tie, if the body is old enough for it. A garment its package does not draw
 //      (a doublet over a roll skirt) is drawn as the package's own kind in its place, with its colour: a FALLBACK, and the report says which.
 //   4. The shift is always on: with nothing else worn, the base layer is what is drawn.
 //   5. The neckwear, the apron and the stockings are the class's own: what is not worn is not drawn (the report lists it as `unworn`; the mask's bit 2 hides the neckwear, bit 3 the apron, as the torso's and legs' bits
@@ -93,8 +93,9 @@ export function resolveWorn(garments, body = {}, opts = {}) {
   let best = null;
   for (const p of buildable) {
     const child = age < PACKAGE_KINDS[p].adultAt, a = (g) => (g && accepts(p, g, child) ? 1 : 0), Q = PACKAGE_KINDS[p];
-    const extras = (sel.neck?.kind === Q.neck ? 1 : 0) + (sel.over?.kind === Q.over ? 1 : 0) + (sel.hose?.kind === Q.hose ? 1 : 0);          // (an apron alone is a working woman's)
-    const score = [a(T) + a(L), a(T), extras, opts.prefer?.id === p ? 1 : 0, (female && PACKAGE_KINDS[p].female) || (male && !PACKAGE_KINDS[p].female) ? 1 : 0];
+    const extras = (T && sel.neck?.kind === Q.neck ? 1 : 0) + (L && sel.over?.kind === Q.over ? 1 : 0) + (sel.hose?.kind === Q.hose ? 1 : 0);          // count only extras whose required torso or legs garment is present
+    const compatibleExtras = ["neck", "over", "hose"].filter(slot => sel[slot] && sel[slot].kind === Q[slot]).length;
+    const score = [a(T) + a(L) + extras, opts.prefer?.id === p ? 1 : 0, a(T), compatibleExtras, (female && PACKAGE_KINDS[p].female) || (male && !PACKAGE_KINDS[p].female) ? 1 : 0];
     if (!best || better(score, best.score)) best = { p, score };
   }
   const res = { garments: stated.map((g) => ({ id: g.id, kind: g.kind, aspects: g.aspects })), outfit: null, cut: null, mask: 0, hose: true, look: null, class: null, drawn: [], unworn: [], notDrawn, conflicts, fallback: null, colours: [], shift: true };

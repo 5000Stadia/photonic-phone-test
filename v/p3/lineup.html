@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Photonic Lineup: thirty people, dressed from their words</title>
+<style>
+  :root { --ground: #5f6266; --ink: #f3f4f5; --shade: rgba(16, 18, 20, 0.66); --chip: rgba(16, 18, 20, 0.55); --chip-on: #1f6f8b; --amber: #ffd27a; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--ink); overflow: hidden; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #panel { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); display: grid; gap: 6px; pointer-events: none; z-index: 3; }
+  #about, #hud { background: var(--shade); padding: 8px 10px; border-radius: 8px; max-width: 38rem; }
+  #hud { font: 12px/1.45 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+  #nav { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; gap: 6px; z-index: 3; }
+  #nav a, #nav button { font: 13px system-ui, sans-serif; color: var(--ink); background: var(--chip); border: 1px solid rgba(255,255,255,0.18); padding: 8px 11px; border-radius: 999px; text-decoration: none; cursor: pointer; }
+  #nav .on { background: var(--chip-on); border-color: transparent; }
+  #nav :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  #tags { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+  #tags.off { display: none; }
+  .tag { position: absolute; left: 0; top: 0; width: 104px; margin-left: -52px; text-align: center; font-size: 10.5px; line-height: 1.25; text-shadow: 0 0 3px #000, 0 0 3px #000; will-change: transform; }
+  .tag b { font-weight: 600; }
+  .tag .n { display: inline-block; background: var(--shade); border-radius: 8px; padding: 0 5px; margin-right: 3px; font: 600 10px ui-monospace, Menlo, monospace; }
+  .tag .sub { display: block; opacity: 0.82; font-size: 9.5px; }
+  .tag .sub.warn { color: var(--amber); opacity: 1; }
+  #list { position: fixed; left: 12px; right: 12px; top: 96px; bottom: 64px; overflow: auto; background: rgba(16, 18, 20, 0.92); border-radius: 8px; padding: 8px 12px; z-index: 4; display: none; }
+  #list.on { display: block; }
+  #list table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  #list th, #list td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  #list td.warn { color: var(--amber); }
+</style>
+<script type="importmap">{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js"
+}}</script>
+</head>
+<body>
+<div id="panel"><div id="about">loading…</div><div id="hud"></div></div>
+<div id="tags"></div>
+<div id="list"></div>
+<nav id="nav"></nav>
+<script type="module" src="./lineup.js"></script>
+</body>
+</html>

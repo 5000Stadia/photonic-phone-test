@@ -1,0 +1,351 @@
+{
+"source": "MPFB2 hm08 base.obj + macrodetails targets (CC0), see vendor/makehuman/NOTICE",
+"units": "decimetres; deltas int16 x 0.001",
+"vertices": 14888,
+"triangles": 26756,
+"eyes": {
+"l": [
+13380,
+72
+],
+"r": [
+13452,
+72
+]
+},
+"garment": {
+"vertices": [
+13524,
+1364
+],
+"triangles": 2636
+},
+"nipple_region": 196,
+"targets": [
+{
+"name": "universal-female-baby-minmuscle-minweight",
+"count": 9133
+},
+{
+"name": "universal-female-baby-minmuscle-averageweight",
+"count": 2304
+},
+{
+"name": "universal-female-baby-minmuscle-maxweight",
+"count": 4276
+},
+{
+"name": "universal-female-baby-averagemuscle-minweight",
+"count": 3635
+},
+{
+"name": "universal-female-baby-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-female-baby-averagemuscle-maxweight",
+"count": 3424
+},
+{
+"name": "universal-female-baby-maxmuscle-minweight",
+"count": 3966
+},
+{
+"name": "universal-female-baby-maxmuscle-averageweight",
+"count": 3967
+},
+{
+"name": "universal-female-baby-maxmuscle-maxweight",
+"count": 3738
+},
+{
+"name": "neutral-female-baby",
+"count": 14888
+},
+{
+"name": "universal-female-child-minmuscle-minweight",
+"count": 9073
+},
+{
+"name": "universal-female-child-minmuscle-averageweight",
+"count": 9465
+},
+{
+"name": "universal-female-child-minmuscle-maxweight",
+"count": 10196
+},
+{
+"name": "universal-female-child-averagemuscle-minweight",
+"count": 5331
+},
+{
+"name": "universal-female-child-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-female-child-averagemuscle-maxweight",
+"count": 4550
+},
+{
+"name": "universal-female-child-maxmuscle-minweight",
+"count": 5313
+},
+{
+"name": "universal-female-child-maxmuscle-averageweight",
+"count": 5265
+},
+{
+"name": "universal-female-child-maxmuscle-maxweight",
+"count": 5161
+},
+{
+"name": "neutral-female-child",
+"count": 14888
+},
+{
+"name": "universal-female-young-minmuscle-minweight",
+"count": 14798
+},
+{
+"name": "universal-female-young-minmuscle-averageweight",
+"count": 3955
+},
+{
+"name": "universal-female-young-minmuscle-maxweight",
+"count": 7544
+},
+{
+"name": "universal-female-young-averagemuscle-minweight",
+"count": 5415
+},
+{
+"name": "universal-female-young-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-female-young-averagemuscle-maxweight",
+"count": 4560
+},
+{
+"name": "universal-female-young-maxmuscle-minweight",
+"count": 5408
+},
+{
+"name": "universal-female-young-maxmuscle-averageweight",
+"count": 5120
+},
+{
+"name": "universal-female-young-maxmuscle-maxweight",
+"count": 5496
+},
+{
+"name": "neutral-female-young",
+"count": 14888
+},
+{
+"name": "universal-female-old-minmuscle-minweight",
+"count": 9870
+},
+{
+"name": "universal-female-old-minmuscle-averageweight",
+"count": 3957
+},
+{
+"name": "universal-female-old-minmuscle-maxweight",
+"count": 7462
+},
+{
+"name": "universal-female-old-averagemuscle-minweight",
+"count": 5403
+},
+{
+"name": "universal-female-old-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-female-old-averagemuscle-maxweight",
+"count": 5193
+},
+{
+"name": "universal-female-old-maxmuscle-minweight",
+"count": 5392
+},
+{
+"name": "universal-female-old-maxmuscle-averageweight",
+"count": 5133
+},
+{
+"name": "universal-female-old-maxmuscle-maxweight",
+"count": 5476
+},
+{
+"name": "neutral-female-old",
+"count": 14888
+},
+{
+"name": "universal-male-baby-minmuscle-minweight",
+"count": 9133
+},
+{
+"name": "universal-male-baby-minmuscle-averageweight",
+"count": 2306
+},
+{
+"name": "universal-male-baby-minmuscle-maxweight",
+"count": 4290
+},
+{
+"name": "universal-male-baby-averagemuscle-minweight",
+"count": 3612
+},
+{
+"name": "universal-male-baby-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-male-baby-averagemuscle-maxweight",
+"count": 3437
+},
+{
+"name": "universal-male-baby-maxmuscle-minweight",
+"count": 3942
+},
+{
+"name": "universal-male-baby-maxmuscle-averageweight",
+"count": 3943
+},
+{
+"name": "universal-male-baby-maxmuscle-maxweight",
+"count": 3716
+},
+{
+"name": "neutral-male-baby",
+"count": 14888
+},
+{
+"name": "universal-male-child-minmuscle-minweight",
+"count": 7729
+},
+{
+"name": "universal-male-child-minmuscle-averageweight",
+"count": 4809
+},
+{
+"name": "universal-male-child-minmuscle-maxweight",
+"count": 8498
+},
+{
+"name": "universal-male-child-averagemuscle-minweight",
+"count": 5028
+},
+{
+"name": "universal-male-child-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-male-child-averagemuscle-maxweight",
+"count": 4952
+},
+{
+"name": "universal-male-child-maxmuscle-minweight",
+"count": 5100
+},
+{
+"name": "universal-male-child-maxmuscle-averageweight",
+"count": 5418
+},
+{
+"name": "universal-male-child-maxmuscle-maxweight",
+"count": 5616
+},
+{
+"name": "neutral-male-child",
+"count": 14888
+},
+{
+"name": "universal-male-young-minmuscle-minweight",
+"count": 6089
+},
+{
+"name": "universal-male-young-minmuscle-averageweight",
+"count": 4949
+},
+{
+"name": "universal-male-young-minmuscle-maxweight",
+"count": 8639
+},
+{
+"name": "universal-male-young-averagemuscle-minweight",
+"count": 4989
+},
+{
+"name": "universal-male-young-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-male-young-averagemuscle-maxweight",
+"count": 5070
+},
+{
+"name": "universal-male-young-maxmuscle-minweight",
+"count": 5375
+},
+{
+"name": "universal-male-young-maxmuscle-averageweight",
+"count": 5275
+},
+{
+"name": "universal-male-young-maxmuscle-maxweight",
+"count": 6031
+},
+{
+"name": "neutral-male-young",
+"count": 14888
+},
+{
+"name": "universal-male-old-minmuscle-minweight",
+"count": 6091
+},
+{
+"name": "universal-male-old-minmuscle-averageweight",
+"count": 4899
+},
+{
+"name": "universal-male-old-minmuscle-maxweight",
+"count": 8639
+},
+{
+"name": "universal-male-old-averagemuscle-minweight",
+"count": 5010
+},
+{
+"name": "universal-male-old-averagemuscle-averageweight",
+"count": 0
+},
+{
+"name": "universal-male-old-averagemuscle-maxweight",
+"count": 5069
+},
+{
+"name": "universal-male-old-maxmuscle-minweight",
+"count": 5353
+},
+{
+"name": "universal-male-old-maxmuscle-averageweight",
+"count": 5275
+},
+{
+"name": "universal-male-old-maxmuscle-maxweight",
+"count": 6035
+},
+{
+"name": "neutral-male-old",
+"count": 14888
+}
+],
+"uv": {
+"vertices": 14517,
+"copies": 1137,
+"triangles": 26756
+}
+}
