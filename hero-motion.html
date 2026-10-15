@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hero motion</title>
+<style>
+  /* One person, large. The canvas has its own band of the screen: nothing is drawn over it (the bar above and the controls below take their own space), so on a phone held upright the figure is never covered. */
+  :root { --ground: #4d5155; --ink: #f2f3f4; --muted: #b8bec5; --chip: #2a2f35; --chip-line: rgba(255,255,255,.16); --on: #1f6f8b; --warn: #ffd27a; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; overflow: hidden;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  header { flex: none; display: flex; gap: 10px; align-items: baseline; padding: 6px 12px 4px; background: #23272c; min-height: 30px; }
+  header a { color: var(--ink); text-decoration: none; opacity: .8; }
+  header b { font-weight: 600; }
+  #hud { margin-left: auto; font: 12px/1.3 ui-monospace, Menlo, monospace; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #stage { flex: 1 1 auto; position: relative; min-height: 0; }
+  #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #err { display: none; position: absolute; left: 8px; right: 8px; top: 8px; background: #5a1d1d; padding: 8px; border-radius: 6px; font: 12px ui-monospace, monospace; white-space: pre-wrap; }
+  #controls { flex: none; background: #23272c; padding: 6px 8px 8px; display: grid; gap: 6px; }
+  .row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .row::-webkit-scrollbar { display: none; }
+  .row > span { flex: none; align-self: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; min-width: 38px; }
+  button { flex: none; font: 13px system-ui, sans-serif; color: var(--ink); background: var(--chip); border: 1px solid var(--chip-line); padding: 7px 11px; border-radius: 999px; cursor: pointer; min-height: 34px; }
+  button.on { background: var(--on); border-color: transparent; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  #note { font-size: 12px; color: var(--muted); padding: 0 4px; min-height: 16px; }
+  #note .warn { color: var(--warn); }
+</style>
+<script type="importmap">{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
+  "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js"
+}}</script>
+</head>
+<body>
+<header><a href="./" aria-label="Back to the Lab">←</a><b>Hero motion</b><span id="hud">loading…</span></header>
+<div id="stage"><div id="err" role="alert"></div></div>
+<div id="controls">
+  <div class="row" id="moves"><span>Do</span></div>
+  <div class="row" id="views"><span>View</span></div>
+  <div class="row" id="time"><span>Time</span></div>
+  <div id="note" role="status"></div>
+</div>
+<script type="module" src="./hero-motion.js"></script>
+</body>
+</html>

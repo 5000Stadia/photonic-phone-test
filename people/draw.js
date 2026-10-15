@@ -1,4 +1,6 @@
-import {sittingBake,SIT_SEGMENTS} from './sitting.js';
+import {sittingBake,SIT_SEGMENTS,sitFrame} from './sitting.js';
+import { makeIdleWalker } from './mocap.js';
+import { between, ease, shifted, standingFeet, walkedBy, WALK_EASE } from './motion.js';
 import { cycleAt, needsWalkBake, advanceBakedPhase, canRebakeAtPhase, childCycles, closestCycle } from "./walk-cache.js";
 import { desiredSpeed } from './pace-walk.js';
 import { walkSample } from './walk-sample.js';
@@ -37,7 +39,7 @@ import { hairRegion } from "./hair.js";
 import { Fn, If, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, vec4, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross, mix, step, select } from "three/tsl";
 import * as TSL from "three/tsl";
 import { TEMPLATE, NEAR, B, morphBasis } from "./bodies.js";
-import { bakePacedCycle, PACE_FRAMES } from "./walk.js";
+import { bakePacedCycle, PACE_FRAMES, writePose } from "./walk.js";
 import { half, bitsOf, packHalf } from "./half.js";
 import { wearMask } from "./outfits.js";
 import { UVN } from "../spikes/makehuman/index.js";
@@ -479,6 +481,187 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return true;
   }
 
+  // ---- what a person is doing, as ONE choice of walk-texture slot and phase ----------------------------------------------------------------
+  // Everything drawn of a person reads it: the body's agent row (and so the skirt and breeches passes and the far hair, which read that row), the
+  // near and mid hair rows, and the contact shadow. Walking: their baked walk. Sitting: the sit segment's slot. Standing, at near and mid: the
+  // captured idle, planted where the last motion left the feet, reached through a short baked hand-over (stop, rise, start, sit). Far keeps the
+  // held walk pose (no idle bake for someone 14 m away). Two slots a stander (idle, hand-over), allocated on the first stop, freed on release.
+  // Hand-overs read their two ends back from the slots the GPU draws (the pose drawn is the pose blended from), and bake 17 key frames.
+  const motions = new WeakMap(), STANDING = new Set(["near", "mid"]);
+  const HANDOVER = { stop: .55, rise: .5, start: WALK_EASE.in, sit: .4, riseIn: .4 }, KEY = 4;
+  const standCounts = { bakes: 0, ms: 0, slots: 0, handovers: 0 };
+  let animNow = 0;
+  const standPose = { J: null, bank: true, rotationPose: true, texturePose: true, Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3) };
+  const standRows = new Float32Array((F + 1) * B * 2 * 4), standBits = bitsOf(standRows), standTmp = new Float32Array(B * 8), standPrev = new Float32Array(B * 4);
+  function motionOf(rec) { let m = motions.get(rec); if (!m) motions.set(rec, m = { mode: null, base: -1, idler: null, scratch: null, t0: 0, idleT0: 0, duration: 0, sit: null, sitSeg: null, sitPhase: 0, risen: null, feet: null, last: null }); return m; }
+  function idlerOf(rec, m) {
+    if (!m.idler) {
+      const v = rec.values;
+      m.idler = makeIdleWalker(rec.far.J, { age: v.age, seed: rec.seed, build: rec.bodyParams.build, keepout: rec.dressing?.keepout ?? null });
+      m.scratch = { J: m.idler.J, Dj: m.idler.Dj, legs: m.idler.legs, sole: m.idler.sole, Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3) };
+    }
+    return m.idler;
+  }
+  // F + 1 frames into a slot (quaternion and offset rows, one quaternion sign along it): frame(f, out) fills out.Wm and out.Pm at every KEY-th
+  // frame and the last; the frames between are the linear blend of their neighbours' rows, as the GPU's filtering blends any two frames
+  function storeFrames(slot, J, frame) {
+    standPose.J = J;
+    const keyAt = (f) => {
+      frame(f, standPose); writePose(standPose, standTmp, 0);
+      for (let bone = 0; bone < B; bone++) {
+        const k = bone * 8, q = (bone * 2 * (F + 1) + f) * 4, u = q + (F + 1) * 4;
+        let dot = 0; for (let c = 0; c < 4; c++) dot += standPrev[bone * 4 + c] * standTmp[k + c];
+        const sign = f && dot < 0 ? -1 : 1;
+        for (let c = 0; c < 4; c++) { standRows[q + c] = standPrev[bone * 4 + c] = sign * standTmp[k + c]; standRows[u + c] = standTmp[k + 4 + c]; }
+      }
+    };
+    for (let f = 0; f <= F; f += KEY) keyAt(f);
+    if (F % KEY) keyAt(F);
+    for (let f = 0; f <= F; f++) {
+      if (f % KEY === 0 || f === F) continue;
+      const f0 = f - f % KEY, f1 = Math.min(F, f0 + KEY), a = (f - f0) / (f1 - f0);
+      for (let r = 0; r < 2 * B; r++) for (let c = 0; c < 4; c++) { const row = r * (F + 1) * 4; standRows[row + f * 4 + c] = standRows[row + f0 * 4 + c] * (1 - a) + standRows[row + f1 * 4 + c] * a; }
+    }
+    const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
+    for (let r = 0; r < 2 * B; r++) packHalf(walkData, ((by + r) * walkW + bx) * 4, standBits, r * (F + 1) * 4, (F + 1) * 4);
+    walkDirty = true;
+  }
+  // a pose read back from a slot at a phase, as the shader reads it (linear between two frames, the quaternion normalised): { W, P }
+  const fromHalf = (h) => { const e = (h >> 10) & 31, m = h & 1023; return (h & 32768 ? -1 : 1) * (e ? 2 ** (e - 15) * (1 + m / 1024) : 2 ** -14 * m / 1024); };
+  function slotPose(slot, phase, J) {
+    const W = new Float64Array(B * 9), P = new Float64Array(B * 3);
+    const t = Math.max(0, Math.min(1, phase)) * F, f = Math.min(F - 1, Math.floor(t)), a = t - f;
+    const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
+    for (let b = 0; b < B; b++) {
+      const rq = ((by + b * 2) * walkW + bx + f) * 4, ru = ((by + b * 2 + 1) * walkW + bx + f) * 4;
+      let x = 0, y = 0, z = 0, w = 0; const v = [0, 0, 0];
+      x = fromHalf(walkData[rq]) * (1 - a) + fromHalf(walkData[rq + 4]) * a; y = fromHalf(walkData[rq + 1]) * (1 - a) + fromHalf(walkData[rq + 5]) * a;
+      z = fromHalf(walkData[rq + 2]) * (1 - a) + fromHalf(walkData[rq + 6]) * a; w = fromHalf(walkData[rq + 3]) * (1 - a) + fromHalf(walkData[rq + 7]) * a;
+      for (let c = 0; c < 3; c++) v[c] = fromHalf(walkData[ru + c]) * (1 - a) + fromHalf(walkData[ru + 4 + c]) * a;
+      const n = Math.hypot(x, y, z, w) || 1; x /= n; y /= n; z /= n; w /= n;
+      const o = b * 9, j = J[b];
+      W[o] = 1 - 2 * (y * y + z * z); W[o + 1] = 2 * (x * y - z * w); W[o + 2] = 2 * (x * z + y * w);
+      W[o + 3] = 2 * (x * y + z * w); W[o + 4] = 1 - 2 * (x * x + z * z); W[o + 5] = 2 * (y * z - x * w);
+      W[o + 6] = 2 * (x * z - y * w); W[o + 7] = 2 * (y * z + x * w); W[o + 8] = 1 - 2 * (x * x + y * y);
+      for (let r = 0; r < 3; r++) P[b * 3 + r] = W[o + r * 3] * j[0] + W[o + r * 3 + 1] * j[1] + W[o + r * 3 + 2] * j[2] + v[r];
+    }
+    return { W, P };
+  }
+  const wrap = (p) => p - Math.floor(p);
+  function bakeIdle(rec, m, feet) {
+    const idle = idlerOf(rec, m); idle.feet = feet; m.feet = feet;
+    storeFrames(m.base, idle.J, (f, out) => { idle.pose(idle, f / F); out.Wm.set(idle.Wm); out.Pm.set(idle.Pm); });
+  }
+  // a hand-over into the second slot: A(s) and B(s) the two motions' poses at s (0..1) of it, blended by the quintic ease, the feet kept honest
+  function bakeHandover(m, kind, A, Bs, duration = HANDOVER[kind]) {
+    const sc = m.scratch;
+    storeFrames(m.base + 1, m.idler.J, (f, out) => { const s = f / F; between(sc, A(s), Bs(s), ease(s)); out.Wm.set(sc.Wm); out.Pm.set(sc.Pm); });
+    m.mode = kind; m.t0 = animNow; m.duration = duration; standCounts.handovers++;
+  }
+  function ensureStanding(rec, m) {
+    if (m.base >= 0) return true;
+    const base = allocateWalk(2); if (base < 0) return false;
+    m.base = base; standCounts.slots += 2; idlerOf(rec, m); return true;
+  }
+  // the pose a stander is drawn in now (the idle at its phase, or partway through a hand-over)
+  function standingNow(rec, m) {
+    if (m.mode === "idle") return slotPose(m.base, wrap((animNow - m.idleT0) / m.idler.duration), m.idler.J);
+    return slotPose(m.base + 1, Math.min(1, (animNow - m.t0) / m.duration), m.idler.J);
+  }
+  // which foot stays planted when a walk stops at this phase: the one the capture has down; in double support, the leading one
+  function plantedFoot(w, phase, pose) {
+    const c = w.contactAt ? [0, 1].map((side) => w.contactAt(phase + (w.phaseOffset ?? 0), side)) : [1, 1];
+    if (c[0] > .5 && c[1] > .5) return pose.P[16 * 3 + 2] >= pose.P[20 * 3 + 2] ? 0 : 1;
+    return c[0] >= c[1] ? 0 : 1;
+  }
+  function animationOf(rec, tier) {
+    const r = chooseAnimation(rec, tier); if (r) motionOf(rec).last = r;
+    // on the way to a seat (approach, turn) the sit is baked ahead with what is left of the frame's budget after their own hand-overs,
+    // so it is ready when the sit-down begins
+    if (rec.sitting && rec.sitMotion && !SIT_SEGMENTS.includes(rec.sitting.segment)) sittingSlot(rec);
+    return r;
+  }
+  function chooseAnimation(rec, tier) {
+    const m = motionOf(rec), stander = STANDING.has(tier) && !!rec.walker?.mocap;
+    if (rec.sitting && SIT_SEGMENTS.includes(rec.sitting.segment)) {
+      const seated = sittingSlot(rec); if (!seated) return null;
+      const segment = rec.sitting.segment, sit = seatedSlots.get(rec);
+      // from standing into the captured sit-down: a short hand-over at its start, in the seat's frame (the population moved them onto the
+      // seat's contact; the sit-down's first pelvis is where they stood)
+      if (segment === "sitDown" && stander && m.base >= 0 && m.mode !== "sit" && m.mode !== "sitIn" && budgetLeft > 0) {
+        const t = performance.now(), J = m.idler.J, motion = rec.sitMotion, dur = motion.durations.sitDown, first = slotPose(sit.base, 0, J);
+        const A = shifted(standingNow(rec, m), first.P[0], first.P[2]), d = Math.min(HANDOVER.sit, dur * .5);
+        bakeHandover(m, "sitIn", () => A, (s) => slotPose(sit.base, s * d / dur, J), d); m.t0 = animNow - rec.sitting.time;
+        budgetLeft -= performance.now() - t;
+      }
+      if (m.mode === "sitIn") { const s = (animNow - m.t0) / m.duration; if (s < 1 && segment === "sitDown") return { slot: m.base + 1, phase: s, kind: "sitIn" }; }
+      // seated -> stand-up: the seated loop is wherever it was when they were asked to rise; a short hand-over into the captured rise
+      if (segment === "standUp" && m.sitSeg === "seated" && stander && m.base >= 0 && budgetLeft > 0) {
+        const t = performance.now(), J = m.idler.J, motion = rec.sitMotion, dur = motion.durations.standUp, d = Math.min(HANDOVER.riseIn, dur * .5);
+        const A = slotPose(sit.base + 1, m.sitPhase, J);
+        bakeHandover(m, "riseIn", () => A, (s) => slotPose(sit.base + 2, s * d / dur, J), d); m.t0 = animNow - rec.sitting.time;
+        budgetLeft -= performance.now() - t;
+      }
+      m.sitSeg = segment; m.sitPhase = seated.phase;
+      if (m.mode === "riseIn") { const s = (animNow - m.t0) / m.duration; if (s < 1 && segment === "standUp") return { slot: m.base + 1, phase: s, kind: "riseIn" }; }
+      m.mode = "sit"; m.sit = sit;
+      // the end of the captured stand-up, kept for the hand-over out of it (the sit slots are let go when they stand)
+      if (segment === "standUp" && seated.phase >= 1 && stander) { const J = rec.far.J, end = slotPose(sit.base + 2, 1, J); m.risen = shifted(end, -end.P[0], -end.P[2]); }
+      return { slot: seated.slot, phase: seated.phase, kind: segment };
+    }
+    m.sitSeg = null;
+    // (a sit still to come keeps what is baked of it: approach and turn)
+    if (seatedSlots.has(rec) && !(rec.sitting && rec.sitMotion)) {
+      // just stood up: keep the stand-up's last pose before its slots go back to the pool
+      if (m.mode === "sit" && !m.risen && stander) { const sit = seatedSlots.get(rec), end = slotPose(sit.base + 2, 1, rec.far.J); m.risen = shifted(end, -end.P[0], -end.P[2]); }
+      releaseSitting(rec);
+    }
+    if (!walkSlot(rec)) return null;
+    const walking = rec.doing?.verb === "goTo" && !rec.doing.planning;
+    const walk = { slot: rec.walkSlot, phase: rec.walkPhase ?? rec.phase, kind: walking ? "walk" : "held" };
+    if (!stander) { if (m.mode !== "sit") m.mode = "walk"; return walk; }
+    if (walking) {
+      if ((m.mode === "idle" || m.mode === "stop" || m.mode === "rise" || (m.mode === "sit" && m.risen)) && m.base >= 0 && budgetLeft > 0) {
+        // stand -> walk: the standing pose stays put in the world while the walk carries the person on, as fast as the population's start
+        // eases them (walkedBy: the same curve), so the hand-over ends on the very phase the walk then plays
+        // (a population that does not ease its walks moves them at full pace from the first frame: the standing pose is left behind faster)
+        const t = performance.now(), w = rec.walker, p0 = walk.phase, eased = !!rec.env?.easeWalks, d = eased ? HANDOVER.start : .35, J = m.idler.J, t0 = rec.doing.walkT ?? 0;
+        const gone = (s) => eased ? w.v * (walkedBy(t0 + s * d) - walkedBy(t0)) : w.v * s * d;
+        const A = m.mode === "sit" ? m.risen : standingNow(rec, m);
+        bakeHandover(m, "start", (s) => shifted(A, 0, -gone(s)), (s) => slotPose(rec.walkSlot, wrap(p0 + gone(s) / w.stride), J));
+        m.risen = null; budgetLeft -= performance.now() - t;
+      }
+      if (m.mode === "start") { const s = (animNow - m.t0) / m.duration; if (s < 1) return { slot: m.base + 1, phase: s, kind: "start" }; }
+      m.mode = "walk"; return walk;
+    }
+    // standing still
+    if (m.mode === "walk" || m.mode === "sit" || m.mode === "start" || m.mode === null) {
+      if (budgetLeft <= 0 || !ensureStanding(rec, m)) return walk;
+      const t = performance.now(), idle = m.idler, J = idle.J;
+      if (m.mode === null || (m.mode === "sit" && !m.risen)) { bakeIdle(rec, m, idle.homeFeet); m.mode = "idle"; m.idleT0 = animNow - rec.rank * idle.duration; }
+      else {
+        const rising = m.mode === "sit", A = rising ? m.risen : slotPose(rec.walkSlot, wrap(walk.phase), J);
+        bakeIdle(rec, m, standingFeet(idle, A, rising ? 2 : plantedFoot(rec.walker, walk.phase, A)));
+        const B0 = slotPose(m.base, 0, J);
+        bakeHandover(m, rising ? "rise" : "stop", () => A, () => B0); m.risen = null;
+      }
+      standCounts.bakes++; standCounts.ms += performance.now() - t; budgetLeft -= performance.now() - t;
+    }
+    if (m.mode === "stop" || m.mode === "rise") {
+      const s = (animNow - m.t0) / m.duration;
+      if (s < 1) return { slot: m.base + 1, phase: s, kind: m.mode, offset: feetCentre(m) };
+      m.mode = "idle"; m.idleT0 = m.t0 + m.duration;
+    }
+    if (m.mode === "idle") return { slot: m.base, phase: wrap((animNow - m.idleT0) / m.idler.duration), kind: "idle", offset: feetCentre(m) };
+    return walk;
+  }
+  const feetCentre = (m) => m.feet ? [(m.feet[0][0] + m.feet[1][0]) / 2, (m.feet[0][1] + m.feet[1][1]) / 2] : null;
+  function releaseStanding(rec) {
+    const m = motions.get(rec); if (!m) return;
+    if (m.base >= 0) { freeWalk.push({ slot: m.base, count: 2 }); walkCounts.slots -= 2; standCounts.slots -= 2; }
+    motions.delete(rec);
+  }
+
   // Babies use white linen even without an outfit. Explicitly undressed older demo
   // people retain the placeholder tint; dressed people use their outfit's shift.
   const tint = (rec) => { if (rec.values.age < 1.5) return rgb(rec, "shift", "#f3f0e8"); if (!rec.tint) { const c = new THREE.Color().setHSL(rec.rank * 7 % 1, 0.35, 0.45); rec.tint = [c.r, c.g, c.b]; } return rec.tint; };
@@ -504,9 +687,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     if (sh) e.mesh.userData.rowBase = rowBase;
     for (const rec of list) {
       if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) { if (overflow === "main") break; demoted.push(rec); continue; }
-      if (!walkSlot(rec)) continue;
-      const seated = sittingSlot(rec);
-      if(rec.sitting && SIT_SEGMENTS.includes(rec.sitting.segment) && !seated)continue;
+      const anim = animationOf(rec, name);
+      if (!anim) continue;
       let ex = 0, gslot = 0;
       if (name === "near") {
         if (!store.slots.has(rec.id) && budgetLeft <= 0) { demoted.push(rec); continue; }
@@ -521,8 +703,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit, rec.far.J).bodice; });
       }
       const o = (rowBase + n) * texels * 4, pos = rec.pos;
-      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = seated?.phase ?? rec.walkPhase ?? rec.phase;
-      D[o + 4] = seated?.slot ?? rec.walkSlot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
+      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = anim.phase;
+      D[o + 4] = anim.slot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
       const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
       D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       D[o + 15] = rec.height;
@@ -539,6 +721,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
           sd.set(row, at);
           for(let t=0;t<tubes;t++) {
             const base=at+t*SPEC_TEXELS*4,s=rec.sitting;
+            const seated=s&&SIT_SEGMENTS.includes(s.segment);
             sd[base+3]=seated?s.seat.height:0;
             sd[base+7]=seated?(s.seat.depth??.4)/2:0;
           }
@@ -554,8 +737,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       const ho = o + (outfit ? 7 : 4)*4;
       D[ho]=rec.hair.colour[0];D[ho+1]=rec.hair.colour[1];D[ho+2]=rec.hair.colour[2];D[ho+3]=rec.hair.style ? 1 : 0;
-      if(name !== "far") { budgetLeft -= hair.add(name,rec,rec._hairBody); rec._hairBody = null; }
-      contact.add(rec);
+      if(name !== "far") { budgetLeft -= hair.add(name,rec,rec._hairBody,anim); rec._hairBody = null; }
+      contact.add(rec, anim.offset);
       n++;
     }
     return n;
@@ -615,7 +798,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     /** `now` is monotonic seconds (defaults to the wall clock); it gates adult upload batches.
      * Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
     update(sorted, now = performance.now() / 1000) {
-      budgetLeft = bakeBudgetMs;
+      budgetLeft = bakeBudgetMs; animNow = now;
       batchDue = now + 1e-9 >= nextBatch;
       if (batchDue) nextBatch = now + .5;
       hair.begin(); contact.begin();
@@ -649,6 +832,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; walkCounts.uploadFrames++; }
       counts.walk = { ...walkCounts, textureBytes: walkData.byteLength };
       counts.sitting = {...sitCounts, bytesPerSitter:3*(F+1)*B*2*4*2};
+      counts.standing = { ...standCounts };
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       contact.end();
       counts.contactDraws = contact.mesh.count ? 1 : 0;
@@ -723,9 +907,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       rest.deferred = deferred;          // settles when the deferred classes are compiled and in use (a test that needs every draw as it will be waits on it after a few updates)
       return rest;
     },
+    /** What a person is drawn doing this frame (the last choice made for them): { kind, slot, phase }, or null before they are drawn. */
+    animation: (rec) => motions.get(rec)?.last ?? null,
+    /** The slot and phase a person's near or mid hair row was last given ({ tier, slot, phase }), to check it against animation(rec). */
+    hairRow: (rec) => hair.row(rec),
+    /** The pose a person is drawn in (read back from the walk texture as the shader reads it): { W, P } in their own frame, or null. For diagnostics. */
+    pose(rec) { const a = motions.get(rec)?.last; return a ? slotPose(a.slot, a.phase, rec.far.J) : null; },
     /** Free a removed person's slots. */
     release(rec) {
-      releaseSitting(rec);
+      releaseSitting(rec); releaseStanding(rec);
       if (rec.walkSlot !== undefined) { const state = bakedCycles.get(rec);
         freeWalk.push({slot:state.base, count:state.count}); walkCounts.slots -= state.count;
         if (state.spare !== undefined && state.spare >= 0) {

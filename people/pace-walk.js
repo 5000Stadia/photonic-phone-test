@@ -35,6 +35,8 @@ export function setWalkSpeed(w,speed) {
 function posePaced(w,phase) {
  const i=Math.min(w.bank.length-2,Math.floor(w.blend)),t=w.blend-i,a=w.bank[i],b=w.bank[i+1];
  const ka=a.keepout,kb=b.keepout;a.keepout=b.keepout=w.keepout;
+ // At the start of a blend only that clip is posed (exactly the numbers blending by 0 gives): the capture's own pace.
+ if(t<=0){poseMocap(a,phase);a.keepout=ka;b.keepout=kb;w.Wm.set(a.Wm);w.Pm.set(a.Pm);return;}
  poseMocap(a,phase);poseMocap(b,phase);a.keepout=ka;b.keepout=kb;
  // Blend captured joint poses; the texture bake projects rotations to SO(3).
  for(let k=0;k<189;k++)w.Wm[k]=a.Wm[k]+(b.Wm[k]-a.Wm[k])*t;

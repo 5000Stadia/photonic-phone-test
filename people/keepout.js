@@ -133,12 +133,16 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
       // The pace bank uses the padded, offline garment/body-class openings.
       // Keep the captured swing; only rotate the whole arm about the chest axis.
       // The extra three degrees cover interpolation and class quantisation, checked
-      // against the held-out mesh sweep at all bank endpoints and blends.
-      const cached=ctx.cachedOpening&&this.openingCycle?.[ctx.captureIndex]?.[Math.round(ctx.capturePhase*32)%32];
-      if(cached&&cached.every(v=>Number.isFinite(v)&&(ctx.captureIndex<2||v<.4))) {
+      // against the held-out mesh sweep at all bank endpoints and blends. The urgent
+      // clip's wide swing (its arms matched against the capture's standing since the
+      // hero study) varies more between bodies than the bins do: seven degrees there.
+      // ctx.opening: [left, right] radians given outright (a standing idle opens its arms once for the whole loop: the widest any of its frames needs)
+      const given=Array.isArray(ctx.opening)&&ctx.opening.every(Number.isFinite)?ctx.opening:null;
+      const cached=given??(ctx.cachedOpening&&this.openingCycle?.[ctx.captureIndex]?.[Math.round(ctx.capturePhase*32)%32]);
+      if(cached&&cached.every(v=>Number.isFinite(v)&&(given||ctx.captureIndex<2||v<.4))) {
         const {W,P}=bones,chest=BI.chest*9;
         for(let side=0;side<2;side++){
-          const sd=sides[side],sg=side?-1:1,angle=cached[side]+Math.PI/60;
+          const sd=sides[side],sg=side?-1:1,angle=cached[side]+(given?0:(ctx.captureIndex===2?7:3)*Math.PI/180);
           const ax=W[chest+2]*sg,ay=W[chest+5]*sg,az=W[chest+8]*sg,c=Math.cos(angle),sn=Math.sin(angle),t=1-c;
           const R=[t*ax*ax+c,t*ax*ay-sn*az,t*ax*az+sn*ay,t*ax*ay+sn*az,t*ay*ay+c,t*ay*az-sn*ax,t*ax*az-sn*ay,t*ay*az+sn*ax,t*az*az+c];
           const o=sd.up*3,x=P[o],y=P[o+1],z=P[o+2];
@@ -207,7 +211,9 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
             // No shoulder is allowed to inherit a penetration from its bin.
             while(!(cleared=clearArm(hi))&&hi<Math.PI/3){lo=hi;hi=Math.min(Math.PI/3,hi+step);}
           } else {
-            while (!(cleared=clearArm(hi)) && hi < Math.PI / 3) { lo = hi; hi += Math.PI / 180; }
+            // (ctx.step: a coarser first search, degrees, for offline poses; the bisection below still finds the minimal opening)
+            const step = (ctx.step ?? 1) * Math.PI / 180;
+            while (!(cleared=clearArm(hi)) && hi < Math.PI / 3) { lo = hi; hi = Math.min(Math.PI / 3, hi + step); }
           }
           if (cleared) {
             if (hi) {

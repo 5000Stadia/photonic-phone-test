@@ -20,8 +20,10 @@ export const PEOPLE_API = "photonic.people/1";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true } = {}) {
-  let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, ...(outfits !== undefined ? { outfits } : {}) });
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true, exactArms = false, easeWalks = false } = {}) {
+  // exactArms: each walker finds its own minimal arm openings over its own clothes (about 12 ms a person, once) instead of the nearest padded bin's
+  // easeWalks: walks start and stop over about half a second (population.js), which the stand hand-overs read best with; it changes trip timing
+  let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, exactArms, easeWalks, ...(outfits !== undefined ? { outfits } : {}) });
   let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
@@ -101,7 +103,7 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
         const done = s.clock ? s.clock() >= s.duration : t >= s.end;
         if (done) { speaking.delete(id); extra.push({ type: "said_end", id, line: s.line }); }
       }
-      counts = draw.update(pop.tick(t, dt, cam));
+      counts = draw.update(pop.tick(t, dt, cam), t);
       return counts;
     },
     add: (doc) => handle(pop.add(doc)),
@@ -116,6 +118,10 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
     presence: (id, mode) => pop.presence(id, mode),
     events() { const e = [...extra, ...pop.events()]; extra = []; return e; },
     stats: () => ({ ...counts, bytes: draw.bytes() }),
+    /** What someone is drawn doing this frame, for diagnostics and the Lab's motion pages: { kind: walk | held | stop | idle | start | rise | sitIn | sitDown | seated | standUp, slot, phase }, or null before they are drawn. */
+    animation(id) { const rec = pop.get(id); return rec ? draw.animation(rec) : null; },
+    /** Diagnostics for the Lab's motion pages: the person's record, what they are drawn doing, and the pose drawn ({ W, P } in their frame). Not a contract. */
+    inspect(id) { const rec = pop.get(id); return rec ? { rec, animation: draw.animation(rec), pose: draw.pose(rec) } : null; },
   });
   let disposal;
   // Normally synchronous; await the result if renderer compilation is in flight.

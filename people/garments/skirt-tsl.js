@@ -20,6 +20,7 @@ import { walkSample } from '../walk-sample.js';
 // Per-instance data, read from the agent texture (row = instance): texel 0 [x, z, heading, phase], texel 1 [walk slot, ., y, .], texel 4 [., ., ., the person's first block (spec row)].
 // The bones are the walk texture's: per slot, columns F + 1 frames, rows 3 B (affine matrix rows); neighbouring captured poses blend transformed points.
 import { BONES } from "../../body.js";
+import { SEAT_EASE, SEAT_EASE_FROM } from "./skirt.js";
 
 export const RINGS = 16, SPEC_TEXELS = 34;
 const BI = Object.fromEntries(BONES.map(([n], i) => [n, i]));
@@ -209,7 +210,9 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
       need[2].assign(select(i.greaterThan(3), max(need[2], sp), need[2]));
     });
     const R0 = [-1, 0, 1].map((d) => max(raw(d).design, need[d + 1]).toVar());
-    return max(R0[1], R0[0].add(R0[2]).mul(0.5)).add(select(rig.S(0).w.greaterThan(0).and(rig.shrt.greaterThan(.5)),rig.H.mul(.035),float(0)));
+    // breeches on a seat ease out round the hip and upper thigh as far as the knees are bent (skirt.js SEAT_EASE says why: 2.5% of the height
+    // at a right angle, none from the knee band down, none standing)
+    return max(R0[1], R0[0].add(R0[2]).mul(0.5)).add(select(rig.S(0).w.greaterThan(0).and(rig.shrt.greaterThan(.5)),rig.H.mul(SEAT_EASE).mul(rig.flex).mul(float(1).sub(smooth(R_HIP + SEAT_EASE_FROM, R_KNEE, kf))),float(0)));
   }
 
   // ---- the render-to-texture passes ----

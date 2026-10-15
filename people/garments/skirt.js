@@ -18,6 +18,15 @@ import { capsuleVolume } from "../keepout.js";
 import { wearer as readWearer, torsoTable, landmarks, planeSegments, trianglesWhere, binByHeight, BI } from "./wearer.js";
 
 export const RINGS = 16, AROUND = 40;
+// Breeches on a seat ease out by this share of the height, as far as the knees are bent (flex, 0 standing to 1 at a right angle), at the
+// rings round the hip and the upper thigh (full to ring 5, none from the knee band, ring 9, down): as the hip bends a thigh comes to lie
+// across those rings, is no longer counted in their floor, and would show through their front. It was 3.5% of the height on every ring
+// at once when a sit-down began: a barrel round each thigh that popped out at the sit-down's start and in at the rise's end. 2.5% here is
+// the least that keeps the legs of the gentleman and the workman (a man, a labourer, a stout man) inside through all the CMU frames
+// (tools/people/sitting-clothes.mjs; the stout workman keeps a 2.4 mm touch at the knee seated).
+export const SEAT_EASE = 0.025, SEAT_EASE_FROM = 1;
+export const seatEaseRing = (k) => 1 - smooth(R_HIP + SEAT_EASE_FROM, R_KNEE, k);
+export const seatEase = (H, flex, k) => SEAT_EASE * H * flex * seatEaseRing(k);
 const AROUND_DEFAULT = AROUND, BRIDGE_GAIN = 0.7;                 // 640 vertices
 export const R_WAIST = 0, R_HIP = 4, R_KNEE = 9, R_ANKLE = 14, R_HEM = 15;
 export const SKIRT_V = RINGS * AROUND;
@@ -382,7 +391,7 @@ export function skirtPose(spec, bones, ctx = {}, out = new Float32Array(RINGS * 
     const cx = ringC[3 * k], cy = ringC[3 * k + 1], cz = ringC[3 * k + 2], nx = ringN[3 * k], ny = ringN[3 * k + 1], nz = ringN[3 * k + 2], fx = ringF[3 * k], fy = ringF[3 * k + 1], fz = ringF[3 * k + 2];
     const lx = fy * nz - fz * ny, ly = fz * nx - fx * nz, lz = fx * ny - fy * nx, base = k * AROUND;
     for (let j = 0; j < AROUND; j++) {
-      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND])) + (seat>0 && ctx.seatEdge!==undefined && spec.short ? .035*spec.H : 0);
+      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND])) + (seat>0 && ctx.seatEdge!==undefined && spec.short ? seatEase(spec.H, flex, k) : 0);          // (the seated ease)
       const o = (base + j) * 3, ux = sn * lx + cs * fx, uy = sn * ly + cs * fy, uz = sn * lz + cs * fz;
       out[o] = cx + r * ux; out[o + 1] = cy + r * uy; out[o + 2] = cz + r * uz;
       UD[o] = ux; UD[o + 1] = uy; UD[o + 2] = uz;
@@ -568,4 +577,39 @@ export function seatKeepout(p,ring,spec,seat,edge) {
   if(!(seat>0))return p;
   const lap=ring<=9||spec.short>.5,top=seat+.004;
   return [p[0],lap&&p[2]<=edge?Math.max(p[1],top):p[1],!lap&&p[1]<top+.03?Math.max(p[2],edge+.004):p[2]];
+}
+
+// How far the clothes stand off a seated wearer's thigh, for the hands to rest on them (sitting.js makeSitting `legs`, population.js prepareSit): from one
+// seated pose (`bones`, as skirtPose takes them, in the wearer's frame) and the seat (ctx: seat, seatEdge), the outer surface's distance from the left
+// femur's axis at nine shares along the thigh (hip to knee, eighths) and four directions round it (straight up, 30, 60 and 90 degrees toward the
+// outside), the furthest of the surface (between the rings and their columns too) within 0.05 of the share and 8 degrees of the direction: a
+// Float64Array of 36, share by share. `specs`: the skirt, or the two tubes of the breeches (the left is read; the right is its mirror). Resting by
+// the bare thigh's girth put the hands 3 to 5 cm inside the workman's breeches and 6 to 8 inside the gentleman's.
+export const COVER_SHARES = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1], COVER_ANGLES = [0, 30, 60, 90];
+const COVER = new Float32Array(SKIRT_V * 3);
+export function thighCover(specs, bones, ctx) {
+  const spec = specs.find((s) => !(s.leg < 0)) ?? specs[0], sk = skirtPose(spec, bones, { ...ctx, phase: 0, sway: 0, cross: false }, COVER), P = bones.P;
+  const a = [P[3 * BI.thighL], P[3 * BI.thighL + 1], P[3 * BI.thighL + 2]], b = [P[3 * BI.shinL], P[3 * BI.shinL + 1], P[3 * BI.shinL + 2]];
+  const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...ax), u = ax.map((v) => v / L);
+  const up0 = [-u[1] * u[0], 1 - u[1] * u[1], -u[1] * u[2]], ul = Math.hypot(...up0) || 1, up = up0.map((v) => v / ul);
+  let out = [u[1] * up[2] - u[2] * up[1], u[2] * up[0] - u[0] * up[2], u[0] * up[1] - u[1] * up[0]];
+  if (out[0] * (a[0] - P[0]) + out[2] * (a[2] - P[2]) < 0) out = out.map((v) => -v);          // outward: away from the pelvis's middle
+  const cover = new Float64Array(COVER_SHARES.length * COVER_ANGLES.length), cs = COVER_ANGLES.map((d) => Math.cos((d * Math.PI) / 180)), sn = COVER_ANGLES.map((d) => Math.sin((d * Math.PI) / 180));
+  const N = 4, q = [0, 0, 0];
+  for (let k = 0; k < RINGS - 1; k++) for (let j = 0; j < AROUND; j++) for (let s = 0; s < N; s++) for (let r = 0; r < N; r++) {
+    const o00 = 3 * (k * AROUND + j), o01 = 3 * (k * AROUND + (j + 1) % AROUND), o10 = o00 + 3 * AROUND, o11 = o01 + 3 * AROUND, x = s / N, y = r / N;
+    for (let c = 0; c < 3; c++) q[c] = (sk[o00 + c] * (1 - y) + sk[o01 + c] * y) * (1 - x) + (sk[o10 + c] * (1 - y) + sk[o11 + c] * y) * x - a[c];
+    const t = (q[0] * u[0] + q[1] * u[1] + q[2] * u[2]) / L;
+    if (t < -0.05 || t > 1.05) continue;
+    const pu = q[0] * up[0] + q[1] * up[1] + q[2] * up[2], po = q[0] * out[0] + q[1] * out[1] + q[2] * out[2];
+    for (let i = 0; i < COVER_SHARES.length; i++) {
+      if (Math.abs(t - COVER_SHARES[i]) > 0.05) continue;
+      for (let d = 0; d < COVER_ANGLES.length; d++) {
+        // the reach along this direction of a point within 8 degrees of it
+        const along = pu * cs[d] + po * sn[d], across = Math.abs(po * cs[d] - pu * sn[d]);
+        if (along > 0 && across < 0.14 * along && along > cover[i * COVER_ANGLES.length + d]) cover[i * COVER_ANGLES.length + d] = along;
+      }
+    }
+  }
+  return cover;
 }

@@ -10,10 +10,12 @@ export function makeContactShadow(THREE, capacity) {
   mesh.name = 'people-contact-shadows'; mesh.count = 0; mesh.frustumCulled = false; mesh.renderOrder = 1;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   const matrix = new THREE.Matrix4();
-  return { mesh, material, begin() { mesh.count = 0; }, add(rec) {
+  // `offset`: where the person's feet are centred, [x, z] in their own frame (a stander planted off their spot; draw.js animationOf), else their spot
+  return { mesh, material, begin() { mesh.count = 0; }, add(rec, offset = null) {
     if (mesh.count >= capacity) return;
-    const width = Math.max(0.45, rec.height * 0.38);
-    matrix.makeScale(width, 1, width * 0.75); matrix.setPosition(rec.pos[0], rec.pos[1] + 0.008, rec.pos[2]);
+    const width = Math.max(0.45, rec.height * 0.38), c = Math.cos(rec.heading ?? 0), s = Math.sin(rec.heading ?? 0);
+    const dx = offset ? offset[0] * c + offset[1] * s : 0, dz = offset ? offset[1] * c - offset[0] * s : 0;
+    matrix.makeScale(width, 1, width * 0.75); matrix.setPosition(rec.pos[0] + dx, rec.pos[1] + 0.008, rec.pos[2] + dz);
     mesh.setMatrixAt(mesh.count++, matrix);
   }, end() { mesh.instanceMatrix.needsUpdate = true; } };
 }

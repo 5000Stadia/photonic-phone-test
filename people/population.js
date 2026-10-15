@@ -1,6 +1,7 @@
 import {seatPlace} from './seats.js';
 import {loadSitting,makeSitting} from './sitting.js';
 import {desiredSpeed,setWalkSpeed} from './pace-walk.js';
+import {WALK_EASE,walkEaseAt,walkedBy} from './motion.js';
 // The population's data layer (R4; design/r4-plan.md): the people store, ranks, tiers, walking, presence, rooms, state,
 // events and hit, in pure JS with no three.js, so node tests it. draw.js reads what tick() returns; index.js wires the
 // two into makePeople (design/interface.md).
@@ -18,6 +19,7 @@ import { makeWalker } from "./walk.js";
 import { outfitFor, dressGarments, dressingOfWorn } from "./outfits.js";
 import { resolveOutfit, baseOnly } from "./garments/worn.js";
 import { look as silkLook } from "./garments/outfit.js";
+import { thighCover } from "./garments/skirt.js";
 import { KINDS } from "./garments/kinds.js";
 const KINDS_SLOT = Object.fromEntries(Object.entries(KINDS).map(([k, v]) => [k, v.slot]));
 
@@ -102,7 +104,7 @@ class Person {
   get walker() {
     if (this._walker !== undefined) return this._walker;
     const v = this.res.values, basis = this.env.basis;
-    const w = (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, samePace: this.env.samePace, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
+    const w = (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, samePace: this.env.samePace, exactArms: this.env.exactArms, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
     if(w?.bank&&this.paceState)setWalkSpeed(w,this.paceState.speed);
     return w;
   }
@@ -129,8 +131,8 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = true, outfits = outfitFor } = {}) {
-  const env = { outfits, basis, walk, samePace };
+export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = true, exactArms = false, easeWalks = false, outfits = outfitFor } = {}) {
+  const env = { outfits, basis, walk, samePace, exactArms, easeWalks };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown
@@ -192,8 +194,16 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const sitting=rec.sitting,bank=await loadSitting();
     if(rec.gone || rec.sitting!==sitting)return false;
     const {J,tip}=rec.body.joints;
-    rec.sitMotion=makeSitting(bank,J,tip,rec.height,sitting.seat.height,sitting.clip);
-    sitting.clip=rec.sitMotion.spec.id;
+    let m=makeSitting(bank,J,tip,rec.height,sitting.seat.height,sitting.clip);
+    // dressed, the hands rest on the clothes over the thighs, measured on this sit's own seated pose (garments/skirt.js thighCover)
+    const d=rec.dressing;
+    if(d?.wear?.skirt){
+      const p=m.pose((m.spec.rest[0]+m.spec.rest[1])/2),bones={W:new Float64Array(189),P:new Float64Array(63)};
+      p.W.forEach((w,b)=>bones.W.set(w,b*9));p.P.forEach((v,b)=>bones.P.set(v,b*3));
+      m=makeSitting(bank,J,tip,rec.height,sitting.seat.height,m.spec.id,thighCover(d.specs,bones,{seat:sitting.seat.height,seatEdge:p.P[14][2]-.05}));
+    }
+    rec.sitMotion=m;
+    sitting.clip=m.spec.id;
     return true;
   }
   async function sit(id,thing,opts={}) {
@@ -313,8 +323,8 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if (rec.values.age < 0.9) { queue.push({ type: "cannot_walk", id: rec.id, reason: "a baby is carried, not walked" }); return false; }
     const r = ctx.walk?.route ? ctx.walk.route(rec.pos, to, rec.floor, rec.half) : [to];   // routes fit this body
     if(rec.walker?.bank) {const p=rec.paceState??={time:0,speed:rec.speed};p.tripTime=0;p.tripStart=rec.speed;}
-    const token = ++rec.goToken;
-    rec.doing = { verb: "goTo", target, opts, route: null, leg: 0, token, planning: true };
+    const token = ++rec.goToken, walkT = rec.doing?.verb === "goTo" ? rec.doing.walkT ?? 0 : 0;
+    rec.doing = { verb: "goTo", target, opts, route: null, leg: 0, token, planning: true, walkT };
     if (r && typeof r.then === "function") { r.then(route => { if (rec.doing?.token === token) setRoute(rec, route); }, () => { if (rec.doing?.token === token) setRoute(rec, null); }); return true; }
     if (r && typeof r.step === "function") { planners.push({ rec, token, stepper: r }); return true; }
     return setRoute(rec, r);
@@ -598,6 +608,19 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     rec.walkDistance += cycles * (rec.walker?.stride ?? rec.speed / rec.rate);
   }
 
+  // easeWalks: a captured walk eases in over its first ~half second and out over its last ~half metre: the speed walked goes from a third to
+  // all of it and back to a third at the goal, where the stand takes over (draw.js). The cycle plays at the pace actually walked (advanceWalk
+  // counts distance), so the feet stay planted through both. A replan keeps its walk's time, so only a real start eases in. Off by default:
+  // it changes every trip's timing (about half a second a trip), which the crowd's navigation and its digests are pinned to.
+  function walkEase(rec, d, dt) {
+    const t = d.walkT ?? 0; d.walkT = t + dt;
+    let rest = 0, prev = rec.pos;
+    for (let k = d.leg; k < d.route.length && rest < WALK_EASE.out; k++) { rest += Math.hypot(d.route[k][0] - prev[0], d.route[k][2] - prev[2]); prev = d.route[k]; }
+    // (the share over this tick: the start's integral exactly, so the draw's hand-over can follow it; the stop's at this tick's distance)
+    const start = dt > 0 ? (walkedBy(t + dt) - walkedBy(t)) / dt : walkEaseAt(t);
+    return Math.min(start, walkEaseAt(Infinity, rest));
+  }
+
   function step(rec, dt, live = false) {
     if(rec.sitting && stepSit(rec,dt))return;
     const d = rec.doing;
@@ -611,7 +634,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if(rec.walker?.bank&&(d.opts?.pace??1)<=0)return;
     if (d.opts?.inPlace) { advanceWalk(rec, rec.rate * (rec.walker?.bank ? 1 : (d.opts.pace ?? 1)) * dt); return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
     const pace = rec.walker?.bank ? 1 : Math.min(1, d.opts?.pace ?? 1), v = rec.speed * pace;
-    let left = live ? Math.min(v * dt, rec.moveLeft) : v * dt;
+    let left = (live ? Math.min(v * dt, rec.moveLeft) : v * dt) * (env.easeWalks && rec.walker?.mocap ? walkEase(rec, d, dt) : 1);
     let startLeft = left;
     const last = d.leg === d.route.length - 1;
     const rest = d.leg < d.route.length ? Math.hypot(d.route[d.leg][0] - rec.pos[0], d.route[d.leg][2] - rec.pos[2]) : 0;
@@ -802,7 +825,15 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     return out;
   }
 
-  // A capsule per person (feet to crown, radius `half`), the same at every tier. Returns the nearest hit.
+  // How tall a person stands for a hit: their height, and on a seat their sitting height (the seat's plus about 0.52 of the stature, the
+  // sitting-height ratio of adults) eased in through the sit-down and out through the rise, as the captured motion lowers and raises them.
+  function topOf(rec) {
+    const s = rec.sitting, m = rec.sitMotion;
+    if (!s || !m || !(s.segment === "sitDown" || s.segment === "seated" || s.segment === "standUp")) return rec.height;
+    const seated = s.seat.height + 0.52 * rec.height, f = Math.min(1, s.time / m.durations[s.segment]), e = f * f * (3 - 2 * f);
+    return s.segment === "seated" ? seated : s.segment === "sitDown" ? rec.height + (seated - rec.height) * e : seated + (rec.height - seated) * e;
+  }
+  // A capsule per person (feet to crown, radius `half`), the same at every tier; a seated person's is their sitting height. Returns the nearest hit.
   function hit(origin, dir) {
     const dl = Math.hypot(...dir), D = dir.map(v => v / dl);
     let best = null;
@@ -812,7 +843,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     for (const id of ids) {
       const rec = people.get(id);
       if (!rec || rec.presence !== "at_scene") continue;
-      const t = rayCapsule(origin, D, [rec.pos[0], rec.pos[1] + rec.half, rec.pos[2]], [rec.pos[0], rec.pos[1] + rec.height - rec.half, rec.pos[2]], rec.half);
+      const t = rayCapsule(origin, D, [rec.pos[0], rec.pos[1] + rec.half, rec.pos[2]], [rec.pos[0], rec.pos[1] + Math.max(rec.half, topOf(rec) - rec.half), rec.pos[2]], rec.half);
       if (t !== null && (!best || t < best.distance)) best = { id: rec.id, distance: t };
     }
     return best;

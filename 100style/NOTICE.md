@@ -55,3 +55,25 @@ CC BY 4.0 obligations above. Source BVH bytes are unchanged.
 
 Only the two new trims are added: **95,381 bytes uncompressed**. Full source
 walks, runs, Old, Skip and BigSteps are not redistributed by this change.
+
+## Photonic standing idle (neutral-idle-v1)
+
+- **What:** `Neutral_idle.bvh`, 206 frames at 30 fps (6.83 s), a seamless standing loop cut from
+  `100STYLE/Neutral/Neutral_ID.bvh` (Neutral style, idle), original file frames **707 to 1117**
+  inclusive (0-based, counting from the first line after `Frame Time`), every second frame kept.
+  The cut lies inside the dataset's published idle range for Neutral (`Frame_Cuts.csv`: ID 655–1555).
+  It was chosen as the 4–7 s span whose two ends match best (windowed joint-position and velocity
+  distance over the cut; 3 mm RMS between the ends); the feet do not move in it.
+- **Changes made:** motion rows outside that range and every other row removed, `Frames` and
+  `Frame Time` updated (0.033333), numbers rounded to four decimals. Hierarchy unchanged.
+- **Source:** 100STYLE.zip, Zenodo record 8127870, https://doi.org/10.5281/zenodo.8127870, member
+  `100STYLE/Neutral/Neutral_ID.bvh`, supplied by the lead 2026-10-15 (byte-range retrieval) and
+  checked as ASCII BVH: a `HIERARCHY` block and numeric motion rows only. Nothing downloaded was executed.
+- **Licence and attribution:** CC BY 4.0 International; Ian Mason, Sebastian Starke and Taku Komura;
+  paper and licence text as credited above.
+- **Runtime derivatives** (`src/people/mocap.js`): the loop's mean pose is the retarget reference for
+  every 100STYLE clip (rotations are matched against the captured person's own standing, not the
+  skeleton's T-pose); the loop itself is retargeted onto each body with both feet planted by leg IK,
+  pelvis sway and height scaled by standing hip height, and baked per person. Walk-to-stand and
+  stand-to-walk are short blends between captured poses (`src/people/motion.js`), not captured clips.
+  These derivatives retain the attribution and CC BY 4.0 obligations above.

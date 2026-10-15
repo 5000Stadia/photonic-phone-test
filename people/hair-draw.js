@@ -107,6 +107,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
   }
   let nextFar = 0;
   const freeFar = [];
+  const written = new WeakMap();          // the walk slot and phase each person's near or mid hair row was last given (for checks)
   function prepareFar(rec) {
     const slot = rec.farHairSlot ??= freeFar.length ? freeFar.pop() : nextFar++;
     farMeta.set([...rec.hair.colour,HAIR_STYLES.indexOf(rec.hair.style)+1],slot*4);farTex.needsUpdate=true;
@@ -124,6 +125,8 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
   }
   return {
     ready, entries, attachFar, prepareFar,
+    /** The walk-texture slot and phase a person's near or mid hair was last drawn at: { tier, slot, phase }, or null. For checks. */
+    row: (rec) => written.get(rec) ?? null,
     dispose(){
       if(disposed)return; disposed=true;
       // Meshes and their shared materials are disposed by the parent draw.
@@ -135,7 +138,8 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
     },
     warm(){for(const tier of ['near','mid'])for(const id of HAIR_STYLES)entry(tier,id);},
     begin(){for(const s of Object.values(states))s.rows=0;for(const e of entries)e.mesh.count=0;},
-    add(tier,rec,nearBody){
+    // `anim`: the person's slot and phase this frame (draw.js animationOf), the same the body's row was given
+    add(tier,rec,nearBody,anim){
       if(!rec.hair.style)return 0;
       const s=state(tier),id=rec.hair.style,e=entry(tier,id);
       if(s.rows>=s.cap)return 0;
@@ -147,8 +151,9 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       }else {s.store.slots.delete(rec.id);s.store.slots.set(rec.id,slot);}
       e.rim.count++;
       const o=(e.mesh.count++*18+e.mesh.userData.rowBase)*4,d=s.data;s.rows++;
-      d[o]=rec.pos[0];d[o+1]=rec.pos[2];d[o+2]=rec.heading;d[o+3]=rec.walkPhase ?? rec.phase;
-      d[o+4]=rec.walkSlot;d[o+5]=slot;d[o+6]=rec.pos[1];
+      d[o]=rec.pos[0];d[o+1]=rec.pos[2];d[o+2]=rec.heading;d[o+3]=anim?.phase ?? rec.walkPhase ?? rec.phase;
+      d[o+4]=anim?.slot ?? rec.walkSlot;d[o+5]=slot;d[o+6]=rec.pos[1];
+      written.set(rec,{tier,slot:d[o+4],phase:d[o+3]});
       d[o+8]=rec.hair.colour[0];d[o+9]=rec.hair.colour[1];d[o+10]=rec.hair.colour[2];
       return elapsed;
     },
