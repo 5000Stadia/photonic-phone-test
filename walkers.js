@@ -1,4 +1,7 @@
-// A person's own walk (R9, R4; after r6-gait §7.2): the fitted walker of spikes/gait/gait.js evaluated
+import { makeMocapWalker, poseMocap } from "./people/mocap.js";
+// A person's own walk: 100STYLE retargeting in mocap.js by default. The fitted
+// walker below remains selectable with who.walk = "fitted" for comparison.
+// Both paths are evaluated
 // per person per frame in JS, mapped onto the stand-in body's 21 bones, and written as one texture the skinning shader
 // reads: per person, per bone, the three columns of the bone's world rotation and its offset u = P - R j (4 texels).
 // The GPU pose pass replaces this only if the phone shows the CPU cost or the upload matters.
@@ -83,6 +86,7 @@ function segmentRotations(P) {
 
 // The bones' world rotations (body frame, row-major) in w.Wm (B x 9) and joint positions in w.Pm (B x 3) at a phase.
 function poseCore(w, phase) {
+  if (w.mocap) return poseMocap(w, phase);
   const drop = w.drop;           // first, not mid-pose: finding it poses the cycle
   angles(w, phase - Math.floor(phase));
   segmentRotations(w.P);
@@ -121,6 +125,7 @@ function lowestFoot(w, drop) {
 // degrees added to both shoulders (an outfit's arm rest, garments/outfit.js); left out, the arms walk as the data has them. `keepout`: { apply(bones, ctx) }, run on every pose
 // (keepout.js), so a wearer's arms stay out of her clothes; left out, nothing is done.
 export function makeWalker(J, who, basis) {
+  if (who.walk !== "fitted") return makeMocapWalker(J, who);
   const hipY = J[0][1], H = who.height ?? J[0][1] / 0.53;
   // root "fitted": the data's own pelvis path, 2 ms a person, against 16 ms for the root from the feet (65 against 42 mm
   // of slide a step). The crowd page bakes on the main thread; the engine moves the full root into a worker (R7).

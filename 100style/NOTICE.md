@@ -16,3 +16,14 @@
   (done in the page, not in the file).
 - **Safety check:** the full file was read as text before trimming: ASCII, a `HIERARCHY` block of `ROOT/JOINT/OFFSET/
   CHANNELS/End Site` lines and a `MOTION` block of numbers only (no non-numeric line). Nothing downloaded was executed.
+
+## Photonic default walker (100style-neutral-v1)
+
+Derived at load/bake time by `src/people/mocap.js` from this unchanged BVH.
+Uses trimmed frames 46–126 (original file frames 571–651), successive left
+ankle forward extrema as heel-strike proxies, not labelled force-plate contacts.
+Changes: periodic endpoint correction/interpolation, heading/travel removal,
+per-bone rest alignment onto the 21-bone MakeHuman rig, leg-length/Froude scaling,
+±15% shoulder amplitude, slight posture/build offsets, seeded phase, root contact
+cleanup, minimal floor-contact leg IK and garment keep-out. These derivatives retain the attribution and
+CC BY 4.0 obligations above. Source BVH bytes are unchanged.

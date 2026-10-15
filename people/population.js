@@ -98,7 +98,7 @@ class Person {
   get walker() {
     if (this._walker !== undefined) return this._walker;
     const v = this.res.values, basis = this.env.basis;
-    return (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), height: this.height, keepout: this.dressing?.keepout }, basis) : null);
+    return (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
   }
   // the walker's speed and cadence never change once it is made (walk.js makeWalker), so they are read once
   get speed() { return (this._speed ??= this.walker ? this.walker.v : 1.3); }
@@ -118,11 +118,12 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  *                           for whoever is there (design/interface.md, "People as obstacles")
  * @param opts.basis       the fitted gait basis (spikes/gait/data/gait-basis.json, loaded)
  * @param opts.thresholds  { near, mid } in metres at middle rank
+ * @param opts.walk        "mocap" (default) or "fitted" for the previous harmonic walker
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, outfits = outfitFor } = {}) {
-  const env = { outfits, basis };
+export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, outfits = outfitFor } = {}) {
+  const env = { outfits, basis, walk };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown

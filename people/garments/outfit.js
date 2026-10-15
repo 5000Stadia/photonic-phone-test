@@ -1,3 +1,4 @@
+import clearanceCycles from '../data/mocap-clearance.js';
 // The outfit package (R5, "an outfit is one package", design/r5-plan.md): what a template set declares so the people layer can dress, hide, hair and
 // draw it as one thing: the pieces and their kinds, the body regions they hide, the loose piece with its inputs, how hair fits under it, and the ages and
 // cuts it is made for. dress() fits it to one wearer.
@@ -245,7 +246,21 @@ export function look(u, outfit = GENTLEWOMAN, u2 = 0) {
 }
 
 /** The keep-out of a wearer's arms for this outfit (keepout.js): the skirt's swell and the legs inside it, from the wearer's skirt spec (an array of two, the tubes of the breeches), their rest joints J (the walker's) and their height. */
+export function clearanceDescriptor(spec,J,height) {
+ const sp=Array.isArray(spec)?spec[0]:spec;
+ return [...J.flat(),...sp.rs,...sp.rf,...sp.rb].map(v=>v/height);
+}
 export function keepOutFor(spec, J, height, outfit = GENTLEWOMAN) {
+ const ko=keepOutUncached(spec,J,height,outfit),sp=Array.isArray(spec)?spec[0]:spec;
+ const descriptor=clearanceDescriptor(spec,J,height);let nearest=null,best=Infinity;
+ for(const row of clearanceCycles)if(row.outfit===outfit.id&&row.cut===sp.cut){
+  let d=0;for(let i=0;i<descriptor.length;i++)d+=(descriptor[i]-row.descriptor[i])**2;
+  if(d<best){best=d;nearest=row;}
+ }
+ ko.openingCycle=nearest?.angles;
+ return ko;
+}
+function keepOutUncached(spec, J, height, outfit) {
   if (outfit.loose.tubes === 2) return armKeepOut(J, height, (bones, ctx) => [...spec.map((sp, i) => skirtVolume(sp, bones, ctx, i)), ...(outfit.keepout.legs ? legVolumes(spec[0], bones) : [])], { clearance: outfit.keepout.clearance });          // (close breeches follow the legs, so the legs' own capsules are asked too: the tube's wall is the legs' where they stride past its design radii)          // the divided breeches: both tubes
   return armKeepOut(J, height, (bones, ctx) => [skirtVolume(spec, bones, ctx), ...legVolumes(spec, bones)]);
 }

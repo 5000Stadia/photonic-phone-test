@@ -96,6 +96,7 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
     return { up, fo, ha, l1, l2, probes: ARM_PROBES.map((p) => ({ ...p, q: p.bone === 2 ? [0, 1, 2].map((k) => g[k] * p.along * l1) : [0, 1, 2].map((k) => (f[k] * p.along + ax[k] * p.lat + cz[k] * p.dep) * l2), r: p.r * l2 })) };
   });
   const clear = clearance * u, soft = SOFT * u, vols = [];
+  let extraClearance = 0;
 
   // where a probe is in the pose `W0 / P0` (the arm's three bones, indexed 0 upper, 1 fore, 2 hand), and the move that gets it out: adds the push (a vector) into out and returns the depth asked
   function probe(side, pr, out) {
@@ -104,14 +105,16 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
     const x = P0[3 * b] + tmp3[0], y = P0[3 * b + 1] + tmp3[1], z = P0[3 * b + 2] + tmp3[2];
     let best = 0;
     for (const v of vols) {
-      const d = v.signed(x, y, z, N), delta = clear + pr.r - d;                    // how far inside the clearance
+      const d = v.signed(x, y, z, N), delta = clear + extraClearance + pr.r - d;                    // how far inside the clearance
       const m = must(delta, soft);
       if (m > best) { best = m; out[0] = N[0]; out[1] = N[1]; out[2] = N[2]; }
     }
     return best;
   }
 
+  const openings = [0,0];
   return {
+    openings,
     /** Where each probe stands in a pose against the volumes: [{ side, name, gap }], gap the distance from the probe's sphere to the nearest volume (negative: inside). For checks. */
     report(bones, ctx = {}) {
       vols.length = 0; for (const v of volumes(bones, ctx)) vols.push(v);
@@ -127,11 +130,14 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
       return out;
     },
     apply(bones, ctx = {}) {
+      extraClearance = (ctx.extraClearance ?? 0) * u;
       vols.length = 0; for (const v of volumes(bones, ctx)) vols.push(v);
       if (!vols.length) return;
       const { W, P } = bones;
       for (const sd of sides) {
         const { up, fo, ha } = sd;
+        const side = up === BI.upperarmL ? 0 : 1;
+        openings[side] = 0;
         // the pose as it came
         for (const [i, b] of [up, fo, ha].entries()) { for (let k = 0; k < 9; k++) W0[9 * i + k] = W[9 * b + k]; for (let k = 0; k < 3; k++) P0[3 * i + k] = P[3 * b + k]; }
         // During walking, first find the smallest shoulder opening that clears
@@ -153,17 +159,47 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
               for (let k = 0; k < 3; k++) P0[i*3+k] = savedP[k] + tmp3[k];
             }
           };
-          const clearArm = () => sd.probes.every(pr => probe(sd,pr,T) <= 1e-7);
-          let lo = 0, hi = 0;
-          while (!clearArm() && hi < Math.PI / 3) { lo = hi; hi += Math.PI / 180; turnArm(hi); }
-          if (clearArm()) {
+          // Rotate each probe directly during the search. Updating three bone
+          // matrices per trial used to dominate a capture bake.
+          const points=sd.probes.map(pr=>{
+            const b=pr.bone===2?0:pr.bone===0?1:2;
+            vm(savedW.subarray(b*9,b*9+9),...pr.q,tmp3);
+            const x=savedP[b*3]+tmp3[0]-savedP[0],y=savedP[b*3+1]+tmp3[1]-savedP[1],z=savedP[b*3+2]+tmp3[2]-savedP[2];
+            return {x,y,z,dot:ax*x+ay*y+az*z,cx:ay*z-az*y,cy:az*x-ax*z,cz:ax*y-ay*x,r:pr.r};
+          });
+          const clearArm = angle => {
+            const c=Math.cos(angle),s=Math.sin(angle),t=1-c;
+            for(const p of points){
+              const x=savedP[0]+c*p.x+s*p.cx+t*ax*p.dot,y=savedP[1]+c*p.y+s*p.cy+t*ay*p.dot,z=savedP[2]+c*p.z+s*p.cz+t*az*p.dot;
+              for(const v of vols)if(must(clear+extraClearance+p.r-v.signed(x,y,z,N),soft)>1e-7)return false;
+            }
+            return true;
+          };
+          let lo = 0, hi = 0, cleared;
+          const hint = ctx.capturePhase === undefined ? null : this.openingCycle?.[Math.round(ctx.capturePhase*32)%32]?.[side];
+          if(hint !== undefined && hint !== null) {
+            // The cached garment/body correction starts the person's exact
+            // clearance. Verify against their own volumes; never trust a bin
+            // to clear a different body. No previous-frame state is consulted.
+            const step=2*Math.PI/180;
+            hi=Math.max(0,hint);
+            // Apply the bin correction, with an exact outward residual only.
+            // No shoulder is allowed to inherit a penetration from its bin.
+            while(!(cleared=clearArm(hi))&&hi<Math.PI/3){lo=hi;hi=Math.min(Math.PI/3,hi+step);}
+          } else {
+            while (!(cleared=clearArm(hi)) && hi < Math.PI / 3) { lo = hi; hi += Math.PI / 180; }
+          }
+          if (cleared) {
             if (hi) {
-              for (let k = 0; k < 10; k++) { const mid = (lo+hi)/2; turnArm(mid); if (clearArm()) hi=mid; else lo=mid; }
+              // Uncached/offline queries retain the minimal opening search.
+              for (let k = 0; k < (hint == null ? 10 : 0); k++) { const mid = (lo+hi)/2; if (clearArm(mid)) hi=mid; else lo=mid; }
               turnArm(hi);
               for (const [i,b] of [up,fo,ha].entries()) { W.set(W0.subarray(i*9,i*9+9),b*9); P.set(P0.subarray(i*3,i*3+3),b*3); }
             }
+            openings[side]=hi;
             continue;
           }
+          openings[side]=null; // IK fallback is deliberately not cached as an angle.
           W0.set(savedW); P0.set(savedP);
         }
         const E0x = P0[3], E0y = P0[4], E0z = P0[5], T0x = P0[6], T0y = P0[7], T0z = P0[8];
