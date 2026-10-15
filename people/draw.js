@@ -262,7 +262,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   function material(e) {
     // (a dressed class's material is the tier's: it reads nothing of this class but the tier's own agent texture, so e stands for them all)
     const { tex: agentTex, tier, outfit } = e, shape = tier === "far" ? "morph" : "exact", store = shape === "exact" ? stores[tier] : null;
-    const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.75, side: tier === "near" ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside; the garments are shells
+    const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0, side: tier === "near" ? THREE.DoubleSide : THREE.FrontSide });   // near: the base layer's hems show their inside; the garments are shells
     if (outfit) m.side = THREE.DoubleSide;
     // a dressed class's first row in its tier's agent texture: the mesh's own (write() sets userData.rowBase), read as the object is rendered, so the classes can share this material
     const rowBase = outfit ? uniform(0, "int").onObjectUpdate(function ({ object }) { this.value = object.userData.rowBase ?? 0; }) : null;
@@ -378,8 +378,9 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     return true;
   }
 
-  // the garment's tint, for now a colour from the rank (the base layer's; a dressed person's is the outfit's shift); and the person's own skin, from their traits
-  const tint = (rec) => { if (!rec.tint) { const c = new THREE.Color().setHSL(rec.rank * 7 % 1, 0.35, 0.45); rec.tint = [c.r, c.g, c.b]; } return rec.tint; };
+  // Babies use white linen even without an outfit. Explicitly undressed older demo
+  // people retain the placeholder tint; dressed people use their outfit's shift.
+  const tint = (rec) => { if (rec.values.age < 1.5) return rgb(rec, "shift", "#f3f0e8"); if (!rec.tint) { const c = new THREE.Color().setHSL(rec.rank * 7 % 1, 0.35, 0.45); rec.tint = [c.r, c.g, c.b]; } return rec.tint; };
   const skin = (rec) => { if (!rec.skin) { const c = new THREE.Color(rec.bodyParams.skin); rec.skin = [c.r, c.g, c.b]; } return rec.skin; };
   const rgb = (rec, name, hex) => { const k = "_c" + name; if (!rec[k]) { const c = new THREE.Color(hex); rec[k] = [c.r, c.g, c.b]; } return rec[k]; };       // name: shift, bodice or skirt: fields of the record (population.js Person)
 

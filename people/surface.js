@@ -16,7 +16,18 @@ export function applySurface(THREE, m, { tier, quality, point, kind, fabric }) {
   const wave = p.x.mul(23).add(p.y.mul(9)).sin().mul(p.z.mul(19).sub(p.y.mul(13)).sin());
   const hem = T.select(k.equal(3), T.float(1).sub(p.y.smoothstep(0.53, 0.61)), T.float(1).sub(p.y.smoothstep(0.06, 0.28)));
   const dye = wave.mul(0.035).add(1).mul(hem.mul(wear).mul(-0.18).add(1));
-  // Far retains its original skin and normal; cloth gets only broad colour variation.
+  // Both direct and environment specular read these same F0/F90 values.
+  // Zero both for matte fibres: low F0 alone still flashes at grazing angles.
+  const gloss = T.select(silk, T.float(0.015), T.select(f.equal(4), T.float(0.008), T.float(0)));
+  const specular = m.setupSpecular;
+  m.setupSpecular = function (builder) {
+    specular.call(this, builder);
+    T.specularColor.assign(T.mix(T.specularColor, T.vec3(gloss, gloss, gloss), cloth));
+    T.specularColorBlended.assign(T.mix(T.specularColorBlended, T.vec3(gloss, gloss, gloss), cloth));
+    T.specularF90.assign(T.mix(T.specularF90, gloss.mul(5), cloth));
+  };
+  m.roughnessNode = T.select(cloth, T.select(silk, T.float(0.56), T.select(wool, T.float(0.94), T.select(f.equal(4), T.float(0.85), T.float(0.9)))), T.float(0.75));
+  // Far retains its original skin and normal; cloth gets broad colour variation and the same matte response.
   m.colorNode = m.colorNode.mul(T.select(cloth, dye, T.float(1)));
   if (tier === 'far') return;
   const down = T.normalWorld.y.negate().clamp();
@@ -26,7 +37,6 @@ export function applySurface(THREE, m, { tier, quality, point, kind, fabric }) {
   // normalView's first initialization inside the cloth branch; TSL then reuses
   // that cached variable for skin/eyes, where it was never initialized.
   m.colorNode = m.colorNode.mul(T.mix(T.float(1), cavity.mul(0.4).oneMinus(), cloth));
-  m.roughnessNode = T.select(cloth, T.select(silk, T.float(0.32), T.select(wool, T.float(0.94), T.float(0.84))), T.float(0.75));
   const freq = T.select(wool, T.float(700), T.float(1200));
   const uv = T.vec2(p.x.add(p.z.mul(0.7)), p.y).mul(freq);
   // Fade before the weave becomes subpixel, avoiding moire on phone and mid people.
@@ -47,7 +57,7 @@ export function applySurface(THREE, m, { tier, quality, point, kind, fabric }) {
       super.direct(input, builder);
       const { lightDirection: l, lightColor, reflectedLight } = input;
       const nl = T.normalView.dot(l), rim = T.normalView.dot(T.positionViewDirection).abs().oneMinus().pow(4);
-      const fibre = T.select(silk, T.float(0.12), T.select(wool, T.float(0.035), T.float(0.01)));
+      const fibre = T.select(silk, T.float(0.035), T.select(wool, T.float(0.012), T.float(0)));
       reflectedLight.directSpecular.addAssign(lightColor.mul(T.select(cloth, rim.mul(nl.clamp()).mul(fibre), T.float(0))).mul(T.diffuseColor.rgb.sqrt()));
       if (detailedSkin) {
         const wrap = nl.add(0.2).div(1.2).clamp().sub(nl.clamp()).max(0);
