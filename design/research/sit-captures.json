@@ -1,0 +1,3879 @@
+{
+  "fps": 120,
+  "frameConvention": "original AMC frame labels, inclusive; cuts never renumbered",
+  "boundaryUncertaintyFrames": 30,
+  "clips": [
+    {
+      "id": "113_15",
+      "subject": "113",
+      "total": 953,
+      "trim": [
+        31,
+        800
+      ],
+      "segments": {
+        "approachTurn": [
+          31,
+          150
+        ],
+        "sitDown": [
+          151,
+          330
+        ],
+        "seated": [
+          331,
+          570
+        ],
+        "standUp": [
+          571,
+          719
+        ],
+        "departure": [
+          720,
+          800
+        ]
+      },
+      "rest": [
+        390,
+        500
+      ],
+      "later": [],
+      "floorM": -0.00347,
+      "footBaselineM": [
+        -0.00347,
+        0.00639
+      ],
+      "originM": [
+        0.29047,
+        0.51178,
+        0.6424
+      ],
+      "scale": 0.88569,
+      "seat": {
+        "pelvisProxyM": 0.51518,
+        "rigPelvisProxyM": 0.45629,
+        "pelvisRangeM": [
+          0.51453,
+          0.51709
+        ],
+        "rigHipHeightErrorM": 0,
+        "physicalSurfaceHeightM": null
+      },
+      "contacts": {
+        "method": "toe head <= initial standing median + 0.035 m; 12-frame centred 3D speed < 0.12 m/s; runs >= 12 frames; kinematic proxies, not force labels",
+        "left": [
+          [
+            31,
+            74
+          ],
+          [
+            135,
+            800
+          ]
+        ],
+        "right": [
+          [
+            72,
+            162
+          ],
+          [
+            172,
+            220
+          ],
+          [
+            238,
+            531
+          ],
+          [
+            562,
+            719
+          ],
+          [
+            775,
+            800
+          ]
+        ]
+      },
+      "quality": {
+        "standingTurningContactRanges": [
+          [
+            [
+              31,
+              74
+            ],
+            [
+              135,
+              150
+            ],
+            [
+              571,
+              800
+            ]
+          ],
+          [
+            [
+              72,
+              150
+            ],
+            [
+              571,
+              719
+            ],
+            [
+              775,
+              800
+            ]
+          ]
+        ],
+        "sourceMaxExcursionCm": [
+          1.46404,
+          2.09622
+        ],
+        "rigMaxExcursionCm": [
+          4.90299,
+          5.33404
+        ],
+        "rigSeatedHipPeakDeviationCm": 0.16957,
+        "retargetMaxDisplacementResidualCm": [
+          5.5937,
+          4.92999
+        ],
+        "sourceScaledMaxExcursionCm": [
+          1.29669,
+          1.8566
+        ],
+        "directionAudit": {
+          "frames": 770,
+          "units": "degrees",
+          "method": "world-space rig child/head-to-tip vector versus scaled ASF E-P; root has no direction",
+          "before": "pre-edit part 1b workspace; preserved baseline, not regenerated"
+        },
+        "directionBefore": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 17.88082456660475,
+            "maxDeg": 17.880824566604876
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 2.093958492412496,
+            "maxDeg": 2.0939584924131918
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 2.093958492412322,
+            "maxDeg": 2.0939584924131918
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 4.523435044409982,
+            "maxDeg": 4.523435044410304
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 8.531373444388281,
+            "maxDeg": 8.531373444388453
+          }
+        ],
+        "directionAfter": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          }
+        ],
+        "independentAudit": {
+          "before": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014406760764456508,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013926940591948798,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012979033604836929,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013009118005955223,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013876734362451117,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013071402144806886,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013763501610832562,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013772153764350817,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013851403565078737,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014476143701740241,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013298617119940009,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013953917045711986,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013691757529199357,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014503741033097944,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001418676619009457,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001457829792999363,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012363366303798608,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001224945304161637,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000016837856256470806,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014585409173651684,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012683187920226744,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014299425013776214,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001297548175373909,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014339996323378485,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014969557064437958,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001439375105971947,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014497975041835727,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000016036041936179377,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014102054085433763,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014541128132672198,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014330002707892306,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014687896638424976,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014417229936898255,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013058513694099647,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013225820193628921,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013352853731343283,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014454574946129973,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014388427593478524,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014479080791194993,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001441175556971184,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013574275978988387,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000011955217379540507,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014130985672464462,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013855352022655085,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001429050342221306,
+                "samples": 3077
+              }
+            }
+          ],
+          "beforeRoundedOverlay": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0.06659662054236808,
+                "maxDeg": 0.5097039295247587,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.011443907174687894,
+                "maxDeg": 0.5062984745110564,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.053233727972387256,
+                "maxDeg": 0.507215570538261,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0.05427125778609896,
+                "maxDeg": 0.3826254698430475,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.008532110775987428,
+                "maxDeg": 0.2688800073379747,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.046177925198936556,
+                "maxDeg": 0.3807739312520559,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0.05622094733805187,
+                "maxDeg": 0.8924719394863957,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.011225089940600723,
+                "maxDeg": 0.9748611353860589,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.045592414210093454,
+                "maxDeg": 0.3440812857595718,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0.025081368757281352,
+                "maxDeg": 0.6557771496612614,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.010646060610018014,
+                "maxDeg": 0.4252837674730907,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.0768836578553153,
+                "maxDeg": 1.3480647044280623,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0.11211477618042599,
+                "maxDeg": 0.7917521616051786,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.029971652763875405,
+                "maxDeg": 5.537728751054065,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.08903731382746075,
+                "maxDeg": 0.7948760116778385,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0.12566850837310473,
+                "maxDeg": 1.0154094768607105,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.04290105319335211,
+                "maxDeg": 2.9038604767201015,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.10695716990185397,
+                "maxDeg": 0.9964617596782784,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0.023960451752189707,
+                "maxDeg": 0.7223253292298295,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.007368488958292129,
+                "maxDeg": 0.6580809325572229,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.043139760730174476,
+                "maxDeg": 1.9773739354883293,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0.1061524995102004,
+                "maxDeg": 0.9163277759807842,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.03339438787940691,
+                "maxDeg": 1.3078572083221045,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.08693721306549317,
+                "maxDeg": 0.9055071432244786,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0.12173600772728839,
+                "maxDeg": 1.39078959642357,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.0466228743120307,
+                "maxDeg": 1.7116854648314466,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.09535409953213683,
+                "maxDeg": 1.1450727746274343,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0.04608284367947312,
+                "maxDeg": 0.5089609780066708,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.016534577357813936,
+                "maxDeg": 1.109110964230764,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.020528020800696847,
+                "maxDeg": 0.5096136406045926,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0.02326938794143335,
+                "maxDeg": 0.8636409492412274,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.010915324396821396,
+                "maxDeg": 0.3646923637648125,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.010343649173276535,
+                "maxDeg": 0.8688645503102229,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0.013062727958454748,
+                "maxDeg": 1.6923589529847307,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.020621866878153892,
+                "maxDeg": 2.8795443634498743,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.007679412427414733,
+                "maxDeg": 0.9989920341012329,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0.03811401210344851,
+                "maxDeg": 0.6497191480623354,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.037202889775759446,
+                "maxDeg": 16.92296468243995,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.018930699575255144,
+                "maxDeg": 0.6380892013231343,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0.027739799530400407,
+                "maxDeg": 0.8512530269445385,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.015381891367027516,
+                "maxDeg": 0.45399803246068987,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.014379766041275442,
+                "maxDeg": 0.8427586755699301,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0.020420228682724934,
+                "maxDeg": 1.8163049850176523,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0.01805389714364609,
+                "maxDeg": 1.9510909939437415,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0.010398080842742833,
+                "maxDeg": 1.1239146108643776,
+                "samples": 3077
+              }
+            }
+          ],
+          "method": "Separately parsed raw ASF/AMC FK, explicit source names and rig joint pairs; common lab yaw; world and canvas (x,-y)/(z,-y) angles. All integer and quarter frames. No rig map/rest/source matrices. Translation and uniform scale cancel in directions.",
+          "frames": 3077,
+          "after": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014406760764456508,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013926940591948798,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012979033604836929,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013009118005955223,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013876734362451117,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013071402144806886,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013763501610832562,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013772153764350817,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013851403565078737,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014476143701740241,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013298617119940009,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013953917045711986,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013691757529199357,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014503741033097944,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001418676619009457,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001457829792999363,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012363366303798608,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001224945304161637,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000016837856256470806,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014585409173651684,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012683187920226744,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014299425013776214,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001297548175373909,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014339996323378485,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014969557064437958,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001439375105971947,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014497975041835727,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000016036041936179377,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014102054085433763,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014541128132672198,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014330002707892306,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014687896638424976,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014417229936898255,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013058513694099647,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013225820193628921,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013352853731343283,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014454574946129973,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014388427593478524,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014479080791194993,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001441175556971184,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013574275978988387,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000011955217379540507,
+                "samples": 3077
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014130985672464462,
+                "samples": 3077
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013855352022655085,
+                "samples": 3077
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001429050342221306,
+                "samples": 3077
+              }
+            }
+          ]
+        }
+      },
+      "bytes": 591897
+    },
+    {
+      "id": "13_05",
+      "subject": "13",
+      "total": 4403,
+      "trim": [
+        31,
+        1450
+      ],
+      "segments": {
+        "approachTurn": [
+          31,
+          230
+        ],
+        "sitDown": [
+          231,
+          360
+        ],
+        "seated": [
+          361,
+          1270
+        ],
+        "standUp": [
+          1271,
+          1360
+        ],
+        "departure": [
+          1361,
+          1450
+        ]
+      },
+      "rest": [
+        650,
+        1100
+      ],
+      "later": [
+        {
+          "approachTurn": [
+            1451,
+            1850
+          ],
+          "sitDown": [
+            1851,
+            2040
+          ],
+          "seated": [
+            2041,
+            2890
+          ],
+          "standUp": [
+            2891,
+            3020
+          ]
+        },
+        {
+          "approachTurn": [
+            3021,
+            3420
+          ],
+          "sitDown": [
+            3421,
+            3600
+          ],
+          "seated": [
+            3601,
+            4403
+          ],
+          "standUp": null
+        }
+      ],
+      "floorM": 0.04841,
+      "footBaselineM": [
+        0.04841,
+        0.09089
+      ],
+      "originM": [
+        0.05718,
+        0.5681,
+        -0.38628
+      ],
+      "scale": 0.79209,
+      "seat": {
+        "pelvisProxyM": 0.51941,
+        "rigPelvisProxyM": 0.41142,
+        "pelvisRangeM": [
+          0.51485,
+          0.52119
+        ],
+        "rigHipHeightErrorM": 0,
+        "physicalSurfaceHeightM": null
+      },
+      "contacts": {
+        "method": "toe head <= initial standing median + 0.035 m; 12-frame centred 3D speed < 0.12 m/s; runs >= 12 frames; kinematic proxies, not force labels",
+        "left": [
+          [
+            31,
+            114
+          ],
+          [
+            199,
+            421
+          ],
+          [
+            1249,
+            1450
+          ]
+        ],
+        "right": [
+          [
+            102,
+            199
+          ],
+          [
+            246,
+            259
+          ],
+          [
+            264,
+            348
+          ],
+          [
+            1249,
+            1360
+          ]
+        ]
+      },
+      "quality": {
+        "standingTurningContactRanges": [
+          [
+            [
+              31,
+              114
+            ],
+            [
+              199,
+              230
+            ],
+            [
+              1271,
+              1450
+            ]
+          ],
+          [
+            [
+              102,
+              199
+            ],
+            [
+              1271,
+              1360
+            ]
+          ]
+        ],
+        "sourceMaxExcursionCm": [
+          2.60111,
+          1.23127
+        ],
+        "rigMaxExcursionCm": [
+          5.90012,
+          2.48347
+        ],
+        "rigSeatedHipPeakDeviationCm": 0.36098,
+        "retargetMaxDisplacementResidualCm": [
+          4.38185,
+          2.09478
+        ],
+        "sourceScaledMaxExcursionCm": [
+          2.06032,
+          0.97528
+        ],
+        "directionAudit": {
+          "frames": 1420,
+          "units": "degrees",
+          "method": "world-space rig child/head-to-tip vector versus scaled ASF E-P; root has no direction",
+          "before": "pre-edit part 1b workspace; preserved baseline, not regenerated"
+        },
+        "directionBefore": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 3.648522232177202,
+            "maxDeg": 3.648522232177502
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 2.093958492412496,
+            "maxDeg": 2.0939584924131918
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 2.0939584924131918,
+            "maxDeg": 2.0939584924140626
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 4.519194671262878,
+            "maxDeg": 4.5191946712632
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 9.068193497518221,
+            "maxDeg": 9.068193497518385
+          }
+        ],
+        "directionAfter": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          }
+        ],
+        "independentAudit": {
+          "before": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014564471084466141,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001378759592022956,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013215912880698319,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001482999219322953,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014259275612848207,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013895488018354865,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014581552548277297,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014818112697986924,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014709702602408567,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015880035776442453,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014408934169766687,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014258497107803156,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014432681038566377,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013954800220906763,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014442950285210428,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014130169327228737,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013514766466557251,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014285198043095431,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012785517673375003,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013194009742818603,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001450741058582476,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012766897186469116,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013841888661877252,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014474896536402559,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014344504580815143,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014302858669646903,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001336281896820372,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015455528960046024,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014347078217731995,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014654987263222997,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015022944653743436,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014611729498404959,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013127729798427136,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.00000133765375371649,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013256620060069885,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013069049677226797,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012942715536042228,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014310682904670124,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014332096946311635,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014867388412483224,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013988903456496752,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014314490029068458,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014353562545042552,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014318771714988777,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013206785841923097,
+                "samples": 5677
+              }
+            }
+          ],
+          "beforeRoundedOverlay": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0.02356031194683698,
+                "maxDeg": 0.7306612138855489,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.007519441178150974,
+                "maxDeg": 0.518743001099469,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.01538916710469206,
+                "maxDeg": 0.7112922634036567,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0.02997705148460467,
+                "maxDeg": 0.700633083108009,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.010703402497036727,
+                "maxDeg": 0.9203403148121819,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.019008472208634337,
+                "maxDeg": 0.6367221695719375,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0.05189948141733147,
+                "maxDeg": 1.1462412210784838,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.022254844198758464,
+                "maxDeg": 0.7663754383845679,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.029271485578923423,
+                "maxDeg": 1.0352464936058452,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0.0219355312741622,
+                "maxDeg": 1.0407373276086664,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.00913172114831575,
+                "maxDeg": 0.6312431723135149,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.03258298863500063,
+                "maxDeg": 3.5942029791582204,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0.03614697759235738,
+                "maxDeg": 0.864673487117544,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.01898560684322017,
+                "maxDeg": 0.7869415691334003,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.015670723216672577,
+                "maxDeg": 0.7849350817041315,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0.053860589395305455,
+                "maxDeg": 0.9936983495888301,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.02600180178450739,
+                "maxDeg": 33.639826574056606,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.02816222336745124,
+                "maxDeg": 0.9938430325541996,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0.02150899628873092,
+                "maxDeg": 0.8040571259437786,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.009452181471438587,
+                "maxDeg": 0.8882350330244897,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.024180925033169026,
+                "maxDeg": 0.8448258454312821,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0.026907221251036725,
+                "maxDeg": 0.6131878930230986,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.014298901855161947,
+                "maxDeg": 0.6816769598780813,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.01373887709406098,
+                "maxDeg": 0.7423612412080376,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0.061545404852346434,
+                "maxDeg": 1.0263273314473735,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.03911974838871066,
+                "maxDeg": 2.6482254886947385,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.031009904628489623,
+                "maxDeg": 1.0412582457238806,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0.03509330850213587,
+                "maxDeg": 1.098803521775777,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.022396774394437234,
+                "maxDeg": 1.0173006971000396,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.01846014859664006,
+                "maxDeg": 0.6833912657374743,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0.025637854270416274,
+                "maxDeg": 1.1580307158474388,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.012980947510054441,
+                "maxDeg": 0.9879427004596735,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.014326529710299359,
+                "maxDeg": 0.7432685301132737,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0.027949152515759534,
+                "maxDeg": 1.6979891679715526,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.02563265228949864,
+                "maxDeg": 1.743360256407289,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.016241182846218023,
+                "maxDeg": 2.7835674005489586,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0.03737907064056347,
+                "maxDeg": 0.7719933568764797,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.026922449580326527,
+                "maxDeg": 1.5841498931680735,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.014358223032224433,
+                "maxDeg": 0.6159094580899642,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0.028797608232030498,
+                "maxDeg": 0.7359000289247423,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.019249670415277007,
+                "maxDeg": 0.5229497715447056,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.013483518044415561,
+                "maxDeg": 0.7990240690832418,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0.03387312395028865,
+                "maxDeg": 1.594031434044041,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0.023686829875857678,
+                "maxDeg": 2.4322052703335455,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0.016134260837653583,
+                "maxDeg": 1.1645577525744977,
+                "samples": 5677
+              }
+            }
+          ],
+          "method": "Separately parsed raw ASF/AMC FK, explicit source names and rig joint pairs; common lab yaw; world and canvas (x,-y)/(z,-y) angles. All integer and quarter frames. No rig map/rest/source matrices. Translation and uniform scale cancel in directions.",
+          "frames": 5677,
+          "after": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014564471084466141,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001378759592022956,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013215912880698319,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001482999219322953,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014259275612848207,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013895488018354865,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014581552548277297,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014818112697986924,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014709702602408567,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015880035776442453,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014408934169766687,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014258497107803156,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014432681038566377,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013954800220906763,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014442950285210428,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014130169327228737,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013514766466557251,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014285198043095431,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012785517673375003,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013194009742818603,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001450741058582476,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012766897186469116,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013841888661877252,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014474896536402559,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014344504580815143,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014302858669646903,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001336281896820372,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015455528960046024,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014347078217731995,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014654987263222997,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015022944653743436,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014611729498404959,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013127729798427136,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.00000133765375371649,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013256620060069885,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013069049677226797,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012942715536042228,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014310682904670124,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014332096946311635,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014867388412483224,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013988903456496752,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014314490029068458,
+                "samples": 5677
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014353562545042552,
+                "samples": 5677
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014318771714988777,
+                "samples": 5677
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013206785841923097,
+                "samples": 5677
+              }
+            }
+          ]
+        }
+      },
+      "bytes": 1091231
+    },
+    {
+      "id": "13_01",
+      "subject": "13",
+      "total": 2313,
+      "trim": [
+        31,
+        1100
+      ],
+      "segments": {
+        "approachTurn": [
+          31,
+          360
+        ],
+        "sitDown": [
+          361,
+          580
+        ],
+        "seated": [
+          581,
+          910
+        ],
+        "standUp": [
+          911,
+          990
+        ],
+        "departure": [
+          991,
+          1100
+        ]
+      },
+      "rest": [
+        620,
+        830
+      ],
+      "later": [
+        {
+          "approachTurn": [
+            1101,
+            1450
+          ],
+          "sitDown": [
+            1451,
+            1620
+          ],
+          "seated": [
+            1621,
+            2170
+          ],
+          "standUp": [
+            2171,
+            2260
+          ],
+          "departure": [
+            2261,
+            2313
+          ]
+        }
+      ],
+      "floorM": 0.04165,
+      "footBaselineM": [
+        0.07715,
+        0.04165
+      ],
+      "originM": [
+        0.00502,
+        0.88422,
+        -0.35373
+      ],
+      "scale": 0.79209,
+      "seat": {
+        "pelvisProxyM": 0.84279,
+        "rigPelvisProxyM": 0.66757,
+        "pelvisRangeM": [
+          0.84162,
+          0.8435
+        ],
+        "rigHipHeightErrorM": 0,
+        "physicalSurfaceHeightM": null
+      },
+      "contacts": {
+        "method": "toe head <= initial standing median + 0.035 m; 12-frame centred 3D speed < 0.12 m/s; runs >= 12 frames; kinematic proxies, not force labels",
+        "left": [
+          [
+            31,
+            71
+          ],
+          [
+            152,
+            171
+          ],
+          [
+            175,
+            309
+          ],
+          [
+            364,
+            548
+          ],
+          [
+            557,
+            857
+          ],
+          [
+            868,
+            990
+          ],
+          [
+            992,
+            1003
+          ]
+        ],
+        "right": [
+          [
+            31,
+            177
+          ],
+          [
+            287,
+            1100
+          ]
+        ]
+      },
+      "quality": {
+        "standingTurningContactRanges": [
+          [
+            [
+              31,
+              71
+            ],
+            [
+              152,
+              171
+            ],
+            [
+              175,
+              309
+            ],
+            [
+              911,
+              990
+            ]
+          ],
+          [
+            [
+              31,
+              177
+            ],
+            [
+              287,
+              360
+            ],
+            [
+              911,
+              1100
+            ]
+          ]
+        ],
+        "sourceMaxExcursionCm": [
+          3.19258,
+          2.63978
+        ],
+        "rigMaxExcursionCm": [
+          2.76007,
+          4.59196
+        ],
+        "rigSeatedHipPeakDeviationCm": 0.093,
+        "retargetMaxDisplacementResidualCm": [
+          2.34124,
+          3.7234
+        ],
+        "sourceScaledMaxExcursionCm": [
+          2.52882,
+          2.09095
+        ],
+        "directionAudit": {
+          "frames": 1070,
+          "units": "degrees",
+          "method": "world-space rig child/head-to-tip vector versus scaled ASF E-P; root has no direction",
+          "before": "pre-edit part 1b workspace; preserved baseline, not regenerated"
+        },
+        "directionBefore": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 3.648522232177202,
+            "maxDeg": 3.648522232177502
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 2.093958492412496,
+            "maxDeg": 2.0939584924130177
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 2.0939584924131918,
+            "maxDeg": 2.0939584924137145
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 4.519194671262878,
+            "maxDeg": 4.5191946712631195
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 9.068193497518221,
+            "maxDeg": 9.068193497518344
+          }
+        ],
+        "directionAfter": [
+          {
+            "bone": "hips",
+            "source": "root",
+            "medianDeg": null,
+            "maxDeg": null
+          },
+          {
+            "bone": "spine",
+            "source": "lowerback",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "chest",
+            "source": "thorax",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "neck",
+            "source": "lowerneck",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "head",
+            "source": "head",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "clavL",
+            "source": "lclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmL",
+            "source": "lhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmL",
+            "source": "lradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handL",
+            "source": "lhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "clavR",
+            "source": "rclavicle",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "upperarmR",
+            "source": "rhumerus",
+            "medianDeg": 0,
+            "maxDeg": 0.0000019090959104164224
+          },
+          {
+            "bone": "forearmR",
+            "source": "rradius",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "handR",
+            "source": "rhand",
+            "medianDeg": 0,
+            "maxDeg": 0.0000014787793334710982
+          },
+          {
+            "bone": "thighL",
+            "source": "lfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.000002091309789151873
+          },
+          {
+            "bone": "shinL",
+            "source": "ltibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footL",
+            "source": "lfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeL",
+            "source": "ltoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "thighR",
+            "source": "rfemur",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "shinR",
+            "source": "rtibia",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "footR",
+            "source": "rfoot",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          },
+          {
+            "bone": "toeR",
+            "source": "rtoes",
+            "medianDeg": 0,
+            "maxDeg": 0.0000017075472925031877
+          }
+        ],
+        "independentAudit": {
+          "before": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014564471084466152,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013167188830017712,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013224951640962112,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001482999219322953,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013604440397426009,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013004801581052162,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014581552548277295,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013856188469974847,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013583193465501238,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001588003577644245,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014225148487340839,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012690351110072487,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001666542456548859,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014744041867298588,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001460177936306175,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015798009574632958,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013518986553584464,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013425314199246385,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012785517673375005,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013907520111753148,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013977985520142435,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001474194305464843,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012957825527751412,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013566318732271244,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014344504580815132,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013652592277607238,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013101221000623324,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015455528960046024,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013384093895254036,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001347403234395517,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001679616273399368,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014237978364558208,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014385984341777538,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014955423618339162,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014665134297517908,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013503439799906406,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014470395876016522,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013803957336927752,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014526397016314302,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014867388412483211,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014531816708416567,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014239463721798214,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001435356254504256,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014050099101426326,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014018680033738502,
+                "samples": 4277
+              }
+            }
+          ],
+          "beforeRoundedOverlay": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0.024951828413313965,
+                "maxDeg": 0.2907465210363773,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.009522475559333209,
+                "maxDeg": 0.25275298854016476,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.01574663334602321,
+                "maxDeg": 0.2513616102234833,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0.030250105882185355,
+                "maxDeg": 0.6283719264568546,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.013456306987559449,
+                "maxDeg": 0.5426206237846911,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.016675031808571907,
+                "maxDeg": 0.33730878711586487,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0.037602232716043064,
+                "maxDeg": 0.40709367835638927,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.01863314760184975,
+                "maxDeg": 0.28224859675948444,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.01842133518777638,
+                "maxDeg": 0.3690166761910034,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0.026197179301723855,
+                "maxDeg": 0.9608052327101749,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.015188349897682299,
+                "maxDeg": 1.1767493309004566,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.026686474946850797,
+                "maxDeg": 1.2836329222979987,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0.03736565153243096,
+                "maxDeg": 0.42576560914120626,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.013986679827799067,
+                "maxDeg": 0.4195128827845247,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.021854746472890124,
+                "maxDeg": 0.33940677048212203,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0.04356704499787706,
+                "maxDeg": 0.775796979778863,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.014438802638233007,
+                "maxDeg": 0.6913536754477816,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.023256567989643175,
+                "maxDeg": 0.5954499270480846,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0.032202338052069554,
+                "maxDeg": 1.0818320776029828,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.015049134999369789,
+                "maxDeg": 0.6073958772823883,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.02846703491616874,
+                "maxDeg": 2.6207749192493996,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0.03636129316601308,
+                "maxDeg": 0.49643470552829655,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.015439775441592671,
+                "maxDeg": 0.39434362366449766,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.019016379303604898,
+                "maxDeg": 0.3920986987383922,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0.04955809250848315,
+                "maxDeg": 0.5037414250906569,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.02001650037337373,
+                "maxDeg": 0.5001707064856924,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.028188779637400158,
+                "maxDeg": 0.43501637150942807,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0.031092099188912502,
+                "maxDeg": 0.49697994528806444,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.015323010870912122,
+                "maxDeg": 0.5330335392445713,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.014631098680638619,
+                "maxDeg": 0.4216725043798807,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0.014201965704151403,
+                "maxDeg": 0.76062312669688,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.009331266641740972,
+                "maxDeg": 0.723790934835022,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.005817236641217474,
+                "maxDeg": 0.4343936611908319,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0.02847899032298119,
+                "maxDeg": 1.9418346882718642,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.027511051121360534,
+                "maxDeg": 3.140270489334066,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.017130904805162616,
+                "maxDeg": 2.6338904208673033,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0.033624359618506725,
+                "maxDeg": 0.38675025042520633,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.01705572369615071,
+                "maxDeg": 0.4506132873457009,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.016715519378949086,
+                "maxDeg": 0.2822903840537938,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0.013970837229106334,
+                "maxDeg": 0.5930644980328442,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.006345649262756104,
+                "maxDeg": 0.583288286427626,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.00719286561612029,
+                "maxDeg": 0.3265236840460019,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0.01795788240706147,
+                "maxDeg": 1.1880842794513058,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0.013029614517700263,
+                "maxDeg": 1.4887573997286576,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0.01102657950949209,
+                "maxDeg": 1.311383376170285,
+                "samples": 4277
+              }
+            }
+          ],
+          "method": "Separately parsed raw ASF/AMC FK, explicit source names and rig joint pairs; common lab yaw; world and canvas (x,-y)/(z,-y) angles. All integer and quarter frames. No rig map/rest/source matrices. Translation and uniform scale cancel in directions.",
+          "frames": 4277,
+          "after": [
+            {
+              "bone": "spine",
+              "source": "lowerback",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014564471084466152,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013167188830017712,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013224951640962112,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "chest",
+              "source": "thorax",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001482999219322953,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013604440397426009,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013004801581052162,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "neck",
+              "source": "lowerneck",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014581552548277295,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013856188469974847,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013583193465501238,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavL",
+              "source": "lclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001588003577644245,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014225148487340839,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012690351110072487,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmL",
+              "source": "lhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001666542456548859,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014744041867298588,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001460177936306175,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmL",
+              "source": "lradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015798009574632958,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013518986553584464,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013425314199246385,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "clavR",
+              "source": "rclavicle",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012785517673375005,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013907520111753148,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013977985520142435,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "upperarmR",
+              "source": "rhumerus",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001474194305464843,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000012957825527751412,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013566318732271244,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "forearmR",
+              "source": "rradius",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014344504580815132,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013652592277607238,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013101221000623324,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighL",
+              "source": "lfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000015455528960046024,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013384093895254036,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001347403234395517,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinL",
+              "source": "ltibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001679616273399368,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014237978364558208,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014385984341777538,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footL",
+              "source": "lfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014955423618339162,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014665134297517908,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013503439799906406,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "thighR",
+              "source": "rfemur",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014470395876016522,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000013803957336927752,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014526397016314302,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "shinR",
+              "source": "rtibia",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014867388412483211,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014531816708416567,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014239463721798214,
+                "samples": 4277
+              }
+            },
+            {
+              "bone": "footR",
+              "source": "rfoot",
+              "world": {
+                "medianDeg": 0,
+                "maxDeg": 0.000001435356254504256,
+                "samples": 4277
+              },
+              "front": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014050099101426326,
+                "samples": 4277
+              },
+              "side": {
+                "medianDeg": 0,
+                "maxDeg": 0.0000014018680033738502,
+                "samples": 4277
+              }
+            }
+          ]
+        }
+      },
+      "bytes": 823886
+    }
+  ]
+}
