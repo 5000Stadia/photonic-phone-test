@@ -1,4 +1,4 @@
-import {seatPlace} from './seats.js';
+import {seatPlace,armsOf} from './seats.js';
 import {loadSitting,makeSitting} from './sitting.js';
 import {desiredSpeed,setWalkSpeed} from './pace-walk.js';
 import {WALK_EASE,walkEaseAt,walkedBy} from './motion.js';
@@ -33,6 +33,7 @@ class Person {
     this.sitting = null; this.sitMotion = null; this.sitToken = 0; this.afterStand = null;
     this.doing = null; this.holding = f.holding; this.presence = f.presence; this.tier = null; this.seen = false;
     this.height = f.height; this.lastClock = f.lastClock; this.goToken = 0; this.half = Math.max(0.18, 0.13 * f.height);
+    this.reviewBody = 0;         // the review page's body (draw.js makeDraw `review`): 0 as worn, 1 nude, 2 the undergarments; never set in the crowd
     this.env = env; this.gone = false;
     // what the walking keeps (population.js) and the drawing keeps (draw.js), all here so the shape never changes
     this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined;
@@ -43,7 +44,8 @@ class Person {
     this._hairBody = null;
     this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._attire = null; this._whole = null; this._garments = undefined; this._prefer = null; this._speed = undefined; this._rate = undefined;
   }
-  get bodyParams() { return (this._params ??= paramsFor(this.res.values, this.res.derived)); }
+  // (doc.body: the review page's body sliders, laid over what the traits give: { sex (the gender slider 0..1), age, build, muscle, height (m), skin })
+  get bodyParams() { return (this._params ??= this.doc?.body ? { ...paramsFor(this.res.values, this.res.derived), ...this.doc.body } : paramsFor(this.res.values, this.res.derived)); }
   get body() { return (this._body ??= build(this.bodyParams)); }
   buildNear() { return buildNear(this.bodyParams); }               // the near tier's full body, built when drawn near, not kept
   get far() { return (this._far ??= farBody(this.bodyParams)); }   // the far tier's person and the walker's joints, from the table: no body is built for them
@@ -104,7 +106,8 @@ class Person {
   get walker() {
     if (this._walker !== undefined) return this._walker;
     const v = this.res.values, basis = this.env.basis;
-    const w = (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, samePace: this.env.samePace, exactArms: this.env.exactArms, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
+    const body = this.doc?.body, age = body?.age ?? v.age, sex = body?.sex !== undefined ? (body.sex > 0.5 ? 1 : body.sex < 0.5 ? -1 : 0) : v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0;
+    const w = (this._walker = basis ? makeWalker(this.far.J, { age, sex, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, samePace: this.env.samePace, exactArms: this.env.exactArms, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
     if(w?.bank&&this.paceState)setWalkSpeed(w,this.paceState.speed);
     return w;
   }
@@ -172,7 +175,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const st = doc.state ?? {};
     const at = st.at ?? doc.at ?? {};
     const pos = (at.pos ?? [0, 0, 0]).slice();
-    const height = (res.derived["body.height"] ?? 170) / 100;
+    const height = doc.body?.height ?? (res.derived["body.height"] ?? 170) / 100;
     const rec = new Person({ id, doc, seed, res, rank: uniform(0, id, "rank"), pos, floor: at.floor ?? 0, room: roomOf(pos, at.floor ?? 0, at.room),
       heading: st.heading ?? 0, phase: st.phase ?? uniform(seed, id, "phase0"), holding: st.holding ?? null, presence: st.presence ?? "at_scene", height, lastClock: clock }, env);
     void rec.dressing;           // her skirt's radius is part of her footprint from the start (the stepping aside, the claims)
@@ -195,13 +198,15 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if(rec.gone || rec.sitting!==sitting)return false;
     const {J,tip}=rec.body.joints;
     let m=makeSitting(bank,J,tip,rec.height,sitting.seat.height,sitting.clip);
-    // dressed, the hands rest on the clothes over the thighs, measured on this sit's own seated pose (garments/skirt.js thighCover)
-    const d=rec.dressing;
+    // the hands: on the seat's armrests when it has them (seats.js armsOf), and, dressed, on the clothes over the thighs, measured on this sit's
+    // own seated pose (garments/skirt.js thighCover)
+    const d=rec.dressing,arms=armsOf(sitting);let cover=null;
     if(d?.wear?.skirt){
       const p=m.pose((m.spec.rest[0]+m.spec.rest[1])/2),bones={W:new Float64Array(189),P:new Float64Array(63)};
       p.W.forEach((w,b)=>bones.W.set(w,b*9));p.P.forEach((v,b)=>bones.P.set(v,b*3));
-      m=makeSitting(bank,J,tip,rec.height,sitting.seat.height,m.spec.id,thighCover(d.specs,bones,{seat:sitting.seat.height,seatEdge:p.P[14][2]-.05}));
+      cover=thighCover(d.specs,bones,{seat:sitting.seat.height,seatEdge:p.P[14][2]-.05});
     }
+    if(cover||arms)m=makeSitting(bank,J,tip,rec.height,sitting.seat.height,m.spec.id,cover,arms);
     rec.sitMotion=m;
     sitting.clip=m.spec.id;
     return true;

@@ -27,6 +27,13 @@
   button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
   #note { font-size: 12px; color: var(--muted); padding: 0 4px; min-height: 16px; }
   #note .warn { color: var(--warn); }
+  /* the body sliders: a panel in the controls' own band (never over the figure), shown on demand */
+  #sliders { display: none; grid-template-columns: auto 1fr 4.2em; gap: 2px 8px; align-items: center; padding: 2px 4px 0; font-size: 12px; }
+  #sliders.open { display: grid; }
+  #sliders label { color: var(--muted); }
+  #sliders output { font-variant-numeric: tabular-nums; text-align: right; }
+  #sliders input[type=range] { width: 100%; min-height: 28px; accent-color: var(--on); }
+  #sliders .note { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
 </style>
 <script type="importmap">{"imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.min.js",
@@ -43,6 +50,9 @@
   <div class="row" id="moves"><span>Do</span></div>
   <div class="row" id="views"><span>View</span></div>
   <div class="row" id="time"><span>Time</span></div>
+  <div class="row" id="body"><span>Body</span></div>
+  <div class="row" id="chair"><span>Chair</span></div>
+  <div id="sliders" aria-label="Body sliders"></div>
   <div id="note" role="status"></div>
 </div>
 <script type="module" src="./hero-motion.js"></script>

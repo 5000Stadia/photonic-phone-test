@@ -20,11 +20,12 @@ export const PEOPLE_API = "photonic.people/1";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true, exactArms = false, easeWalks = false } = {}) {
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true, exactArms = false, easeWalks = false, review = false } = {}) {
   // exactArms: each walker finds its own minimal arm openings over its own clothes (about 12 ms a person, once) instead of the nearest padded bin's
   // easeWalks: walks start and stop over about half a second (population.js), which the stand hand-overs read best with; it changes trip timing
   let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, exactArms, easeWalks, ...(outfits !== undefined ? { outfits } : {}) });
-  let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow });
+  // review: the animation review page only (lab/hero-motion), where a person may be shown nude to judge the motion and the body (draw.js makeDraw)
+  let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow, review });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
   let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
@@ -77,6 +78,9 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
         const d = rec.dressing; if (!d || !(garment in d.wear)) return false; d.wear[garment] = !!on; return true;
       },
       worn: () => rec.garments(),             // the garments they wear, [{ id, kind, aspects }], the shift among them
+      // the review page only (makePeople review): "nude" (no base layer, no stockings or shoes) or "under" (the base layer only) over whatever
+      // they wear (wear([]) to take the garments off), null as worn; false where review is off
+      reviewBody(mode) { if (!review) return false; rec.reviewBody = mode === "nude" ? 1 : mode === "under" ? 2 : 0; return true; },
       dressing: () => rec.attire,             // the report of the last wear (or of what the crowd's rule gave them): what is drawn and what is not
       bounds: () => ({ half: rec.half, height: rec.height, reach: 0.42 * rec.height }),
       state: () => pop.state(id),

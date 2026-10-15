@@ -5,13 +5,19 @@
 //   Do: walk, stop, sit, stand up, or the tour of all of them. View: orbit (drag), side, front, three-quarter, back, face, feet; the camera follows him.
 //   Time: 1x, 1/2, 1/4, 1/10, pause, step a frame. Capture: the raw captured skeleton over him (pale lines), aligned at the pelvis and scaled to his
 //   hip height: compare the angles of the limbs. Hand-overs (stop, start, rise, sit-in) are blended, not captured, so no capture is shown for them.
-//   ?view=side|front|...  ?capture=1  ?do=walk|stop|sit|rise|tour  ?keepout=0 (arms as captured, clothes ignored: a diagnostic)  ?gl=1 (WebGL2)
-// window.hero: { go(action), view(name), speed(x), advance(seconds), render(), state(), ready } for deterministic stills.
+//   Body: nude (the default here, to judge the motion and the body itself; Kabe, 2026-10-15), the undergarments (the base layer), or dressed in
+//   his working clothes; the sliders change the body (age, sex, height, build, muscle, skin) live. The crowd is always dressed: only this page
+//   asks the draw for a nude person (makePeople review). Chair: with arms (his hands on the armrests, as the captured sitter's were) or without
+//   (on his own thighs and knees).
+//   ?view=side|front|...  ?hold=1 (the camera held still)  ?capture=1  ?do=walk|stop|sit|rise|tour  ?body=nude|under|dressed  ?arms=1  ?keepout=0 (arms as captured, clothes
+//   ignored: a diagnostic)  ?gl=1 (WebGL2)
+// window.hero: { go(action), view(name), speed(x), advance(seconds), render(), state(), clothes(mode), arms(on), body(params), ready } for stills.
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { makePeople } from "./people/index.js";
 import { WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN } from "./people/garments/outfit.js";
 import { loadSitting, makeSitting, fittingSeatHeight, sitFrame } from "./people/sitting.js";
+import { skinColour } from "./people/shape.js";
 import { CLIPS, IDLE, CAPTURE, IDLE_CAPTURE } from "./people/mocap.js";
 import { BONES } from "./people/bodies.js";
 import { makeStage } from "./plaza.js";
@@ -36,6 +42,12 @@ await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? "WebGPU" : "WebGL2";
 const scene = makeStage(THREE, { quality: q.get("q") ?? undefined, renderer });
 scene.fog = null;
+// (this page only: the stage's sun casts its shadows over 44 m on a 512 or 1024 map, 4 to 9 cm a texel, which bands a body seen this close
+// with stripes of self-shadow; here its shadows cover 4.8 m round him on a 1024 map, about 5 mm a texel, and follow him: followSun)
+const sun = scene.children.find((o) => o.isDirectionalLight), sunOffset = sun.position.clone().sub(sun.target.position);
+sun.shadow.mapSize.setScalar(1024); sun.shadow.normalBias = 0.008;
+Object.assign(sun.shadow.camera, { left: -2.4, right: 2.4, top: 2.4, bottom: -2.4, near: 0.5, far: sunOffset.length() + 6 }); sun.shadow.camera.updateProjectionMatrix();
+const followSun = (x, z) => { sun.target.position.set(x, 0, z); sun.position.copy(sun.target.position).add(sunOffset); sun.target.updateMatrixWorld(); };
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 200);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.495; controls.minDistance = 0.4; controls.maxDistance = 14; controls.enablePan = false;
@@ -45,13 +57,27 @@ new ResizeObserver(size).observe(stageEl); size();
 // ---- the hero and his chair ----
 const cast = castOf(), who = cast.find((c) => c.id === HERO);
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
-const people = makePeople(THREE, { basis, thresholds: { near: 400, mid: 800 }, nearCapacity: 4, capacity: 8, exactArms: true, easeWalks: true,
+const people = makePeople(THREE, { basis, thresholds: { near: 400, mid: 800 }, nearCapacity: 4, capacity: 8, exactArms: true, easeWalks: true, review: true,
   outfits: (id) => (id === HERO && who.dress?.outfit ? { outfit: who.dress.outfit, look: who.dress.look } : null) });
 scene.add(people.group);
 people.warm([WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN]);
-const hero = people.add({ id: HERO, seed: who.seed, recipe: who.said, at: { pos: [0, 0, 0], room: "hall" }, state: { heading: 0, phase: 0.3 } });
-// ?keepout=0: the arms as captured, with nothing keeping them out of his clothes (a diagnostic, to see what the keep-out does)
-if (q.get("keepout") === "0") people.inspect(HERO).rec.dressing.keepout = null;
+// Body: "nude" (the base layer dropped: makePeople review), "under" (the base layer, in linen rather than the crowd's placeholder tint), "dressed"
+let clothes = { nude: "nude", under: "under", undergarments: "under", dressed: "dressed" }[q.get("body")] ?? "nude", bodyOver = null, dressedList = null, hero = null;
+const LINEN = new THREE.Color("#e8e2d2").toArray();
+function addHero(pos, heading, phase) {
+  hero = people.add({ id: HERO, seed: who.seed, recipe: who.said, at: { pos, room: "hall" }, state: { heading, phase }, ...(bodyOver ? { body: bodyOver } : {}) });
+  dressedList = hero.worn();           // what the words dress him in, to put back on
+  applyClothes();
+}
+function applyClothes() {
+  const rec = people.inspect(HERO).rec;
+  if (clothes === "dressed") {
+    hero.reviewBody(null); hero.wear(dressedList);
+    // ?keepout=0: the arms as captured, with nothing keeping them out of his clothes (a diagnostic, to see what the keep-out does)
+    if (q.get("keepout") === "0" && rec.dressing) rec.dressing.keepout = null;
+  } else { hero.wear([]); hero.reviewBody(clothes); rec.tint = LINEN; }
+}
+addHero([0, 0, 0], 0, 0.3);
 const sitBank = await loadSitting();
 const rec0 = people.inspect(HERO).rec, { J, tip } = rec0.body.joints;
 const seatH = fittingSeatHeight(sitBank, J, tip, rec0.height, "113_15");
@@ -60,16 +86,32 @@ const fit = makeSitting(sitBank, J, tip, rec0.height, seatH, "113_15"), first = 
 const CHAIR = [-1.6, 0], FACING = Math.PI / 2, c = Math.cos(FACING), s = Math.sin(FACING);
 const seat = { id: "chair", floor: 0, height: seatH, facing: FACING, width: 0.46, depth: 0.42,
   contact: [CHAIR[0] - (c * first[0] + s * first[2]), CHAIR[1] - (-s * first[0] + c * first[2])] };
-{
-  const wood = new THREE.MeshStandardMaterial({ color: 0x6f5a44, roughness: 0.95 }), chair = new THREE.Group();
-  const board = new THREE.Mesh(new THREE.BoxGeometry(seat.width, 0.035, seat.depth), wood); board.position.y = seatH - 0.0175; chair.add(board);
-  for (const x of [-1, 1]) for (const z of [-1, 1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.03, seatH - 0.035, 0.03), wood); leg.position.set(x * (seat.width / 2 - 0.03), (seatH - 0.035) / 2, z * (seat.depth / 2 - 0.03)); chair.add(leg); }
-  const back = new THREE.Mesh(new THREE.BoxGeometry(seat.width, 0.45, 0.03), wood); back.position.set(0, seatH + 0.22, -seat.depth / 2 + 0.015); chair.add(back);
+// its arms (the seat contract, design/r6-seats.md: side is the sitter's own, at the armrest top's centre projected to the floor, height above the
+// floor, length along the facing): 22 cm above the seat, just outside it, from the back to near the front
+const ARM_UP = 0.22, ARM_OUT = seat.width / 2 + 0.035, ARM_LEN = 0.4, ARM_Z = -0.01;
+const toWorld = (x, z) => [seat.contact[0] + x * c + z * s, seat.contact[1] - x * s + z * c];
+const ARMS = [{ side: "left", at: toWorld(ARM_OUT, ARM_Z), height: seatH + ARM_UP, length: ARM_LEN }, { side: "right", at: toWorld(-ARM_OUT, ARM_Z), height: seatH + ARM_UP, length: ARM_LEN }];
+let armsOn = q.get("arms") === "1", chair = null;
+function buildChair() {
+  if (chair) { scene.remove(chair); chair.traverse((o) => o.geometry?.dispose()); }
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6f5a44, roughness: 0.95 }), box = (w, h, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wood); m.position.set(x, y, z); chair.add(m); };
+  chair = new THREE.Group();
+  box(seat.width, 0.035, seat.depth, 0, seatH - 0.0175, 0);
+  for (const x of [-1, 1]) for (const z of [-1, 1]) box(0.03, seatH - 0.035, 0.03, x * (seat.width / 2 - 0.03), (seatH - 0.035) / 2, z * (seat.depth / 2 - 0.03));
+  box(seat.width, 0.45, 0.03, 0, seatH + 0.22, -seat.depth / 2 + 0.015);
+  if (armsOn) for (const x of [-1, 1]) {
+    // the armrest (its top at seatH + ARM_UP), a post under its front, and its back joined to the chair's back
+    box(0.055, 0.03, ARM_LEN, x * ARM_OUT, seatH + ARM_UP - 0.015, ARM_Z);
+    box(0.03, ARM_UP, 0.03, x * ARM_OUT, seatH + ARM_UP / 2 - 0.01, ARM_Z + ARM_LEN / 2 - 0.03);
+    box(0.03, ARM_UP, 0.03, x * ARM_OUT, seatH + ARM_UP / 2 - 0.01, -seat.depth / 2 + 0.015);
+  }
   for (const o of chair.children) { o.castShadow = true; o.receiveShadow = true; }
   // the chair's front faces the seat's facing (the board's -z edge is its back)
   chair.rotation.y = FACING; chair.position.set(seat.contact[0], 0, seat.contact[1]);
   scene.add(chair);
+  if (armsOn) seat.arms = ARMS; else delete seat.arms;
 }
+buildChair();
 scene.remove(people.group);
 await renderer.compileAsync(scene, camera); scene.add(people.group);
 await people.compile(renderer, scene, camera, { defer: false });
@@ -128,9 +170,12 @@ function centre(info) {
   const lx = P ? P[0] : 0, lz = P ? P[2] : 0;
   return [r.pos[0] + lx * ch + lz * sh, r.pos[2] + lz * ch - lx * sh, h];
 }
-function place(snap) {
+let holdCam = q.get("hold") === "1";        // Hold: the camera stays where it is (the motion against a still background)
+function place(snap, force = false) {
   const info = people.inspect(HERO); if (!info) return;
   let [x, z, h] = centre(info), v = VIEWS[view], y = v?.h ?? 0.95;
+  followSun(x, z);
+  if (holdCam && !force) return;
   if (!v) { target.set(x, 0.95, z); if (snap) lastTarget.copy(target); camera.position.add(target.clone().sub(lastTarget)); controls.target.copy(target); lastTarget.copy(target); return; }
   if (v.joint !== undefined && info.pose) {
     // a close view looks at joints of the pose drawn (the head, both hands, both ankles), wherever the motion has them
@@ -198,7 +243,9 @@ const mk = (row, text, on, title) => { const b = document.createElement("button"
 const moveButtons = { walk: mk("moves", "Walk", () => actions.walk()), stop: mk("moves", "Stop", () => actions.stop()), sit: mk("moves", "Sit", () => actions.sit()), rise: mk("moves", "Stand up", () => actions.rise()), tour: mk("moves", "Tour", () => actions.tour()) };
 const viewButtons = {};
 for (const name of Object.keys(VIEWS)) viewButtons[name] = mk("views", name[0].toUpperCase() + name.slice(1), () => setView(name));
-function setView(name) { view = name; for (const [k, b] of Object.entries(viewButtons)) b.classList.toggle("on", k === name); place(true); }
+function setView(name) { view = name; for (const [k, b] of Object.entries(viewButtons)) b.classList.toggle("on", k === name); place(true, true); }
+const bHold = mk("views", "Hold", () => { holdCam = !holdCam; bHold.classList.toggle("on", holdCam); }, "keep the camera where it is: the motion against a still background");
+bHold.classList.toggle("on", holdCam);
 let speed = 1, paused = false, stepOnce = false;
 const speedButtons = {};
 for (const [label, x] of [["1×", 1], ["½", 0.5], ["¼", 0.25], ["⅒", 0.1]]) speedButtons[label] = mk("time", label, () => { speed = x; paused = false; for (const [k, b] of Object.entries(speedButtons)) b.classList.toggle("on", k === label); bPause.classList.remove("on"); });
@@ -207,6 +254,64 @@ mk("time", "Step", () => { paused = true; bPause.classList.add("on"); stepOnce =
 const bCap = mk("time", "Capture", () => { showCapture = !showCapture; bCap.classList.toggle("on", showCapture); });
 speedButtons["1×"].classList.add("on"); bCap.classList.toggle("on", showCapture);
 setView(view);
+
+// ---- body: nude, undergarments or dressed; the sliders ----
+const clothesButtons = {};
+function setClothes(mode) {
+  clothes = mode; applyClothes();
+  for (const [k, b] of Object.entries(clothesButtons)) b.classList.toggle("on", k === mode);
+  say({ nude: "Nude: the body itself, to judge the motion and the shape (smooth at the groin, as MakeHuman's body is).", under: "Undergarments: the close-fitting base layer everyone wears under their clothes.", dressed: "Dressed: his working clothes over the same body and motion." }[mode]);
+}
+for (const [mode, label] of [["nude", "Nude"], ["under", "Undergarments"], ["dressed", "Dressed"]]) clothesButtons[mode] = mk("body", label, () => setClothes(mode));
+clothesButtons[clothes].classList.add("on");
+const bSliders = mk("body", "Sliders", () => { const open = $("sliders").classList.toggle("open"); bSliders.classList.toggle("on", open); });
+// The trait axes the body is made from (shape.js paramsFor): the person's age, the gender slider (0 female .. 1 male), height, build (weight),
+// muscle and skin. The traits also name proportions (leg length, shoulder and hip width, head size), but no body target reads them yet: the
+// body is MakeHuman's macro corners and the height alone, so they have no slider here.
+const p0 = rec0.bodyParams, melanin0 = typeof rec0.values["skin.melanin"] === "number" ? rec0.values["skin.melanin"] : 0.25;
+const SLIDERS = [
+  ["age", "Age", 2, 90, 0.5, p0.age, (v) => `${v.toFixed(v < 10 ? 1 : 0)} y`],
+  ["sex", "Sex", 0, 1, 0.01, p0.sex, (v) => (v < 0.35 ? "fem " : v > 0.65 ? "male " : "") + v.toFixed(2)],
+  ["height", "Height", 0.8, 2.1, 0.005, p0.height, (v) => `${(v * 100).toFixed(0)} cm`],
+  ["build", "Build", 0, 1, 0.01, p0.build, (v) => v.toFixed(2)],
+  ["muscle", "Muscle", 0, 1, 0.01, p0.muscle, (v) => v.toFixed(2)],
+  ["skin", "Skin", 0, 1, 0.01, melanin0, (v) => v.toFixed(2)],
+];
+const sliderValues = Object.fromEntries(SLIDERS.map(([k, , , , , v]) => [k, v])), sliderInputs = {};
+for (const [k, label, lo, hi, step, v, fmt] of SLIDERS) {
+  const l = document.createElement("label"), input = document.createElement("input"), out = document.createElement("output");
+  l.textContent = label; l.htmlFor = input.id = "s-" + k;
+  Object.assign(input, { type: "range", min: lo, max: hi, step, value: v }); out.textContent = fmt(v);
+  input.addEventListener("input", () => { sliderValues[k] = +input.value; out.textContent = fmt(+input.value); rebodySoon(); });
+  sliderInputs[k] = { input, out, fmt };
+  $("sliders").append(l, input, out);
+}
+{
+  const reset = document.createElement("button"); reset.textContent = "Reset to L17"; reset.style.gridColumn = "1 / -1"; reset.style.justifySelf = "start";
+  reset.addEventListener("click", () => { for (const [k, , , , , v] of SLIDERS) { sliderValues[k] = v; sliderInputs[k].input.value = v; sliderInputs[k].out.textContent = sliderInputs[k].fmt(v); } bodyOver = null; rebody(); });
+  const note = document.createElement("div"); note.className = "note"; note.textContent = "The traits' proportions (leg length, shoulder and hip width, head size) shape no body yet, so they have no slider.";
+  $("sliders").append(reset, note);
+}
+let rebodyTimer = 0;
+function rebodySoon() { clearTimeout(rebodyTimer); rebodyTimer = setTimeout(() => { bodyOver = { age: sliderValues.age, sex: sliderValues.sex, height: sliderValues.height, build: sliderValues.build, muscle: sliderValues.muscle, skin: skinColour(sliderValues.skin) }; rebody(); }, 220); }
+// a new body: the same person made again with these sliders, where he stands (in front of the chair if he was on it)
+function rebody() {
+  const st = hero.state(), r = people.inspect(HERO).rec, sat = !!st.sitting;
+  const front = toWorld(0, 0.75), pos = sat ? [front[0], 0, front[1]] : r.pos.slice(), heading = sat ? FACING : r.heading;
+  plan = null; people.remove(HERO); addHero(pos, heading, r.walkPhase ?? 0.3);
+  const b = people.inspect(HERO).rec.bodyParams;
+  say(`A new body: ${b.age.toFixed(0)} years, gender ${b.sex.toFixed(2)}, ${(b.height * 100).toFixed(0)} cm, build ${b.build.toFixed(2)}, muscle ${b.muscle.toFixed(2)}.${sat ? " (He stands in front of the chair.)" : ""}`);
+}
+
+// ---- the chair: with arms or without ----
+const chairButtons = { arms: mk("chair", "Arms", () => setArms(true)), none: mk("chair", "No arms", () => setArms(false)) };
+function setArms(on) {
+  armsOn = on; buildChair();
+  chairButtons.arms.classList.toggle("on", on); chairButtons.none.classList.toggle("on", !on);
+  const seated = !!hero.state().sitting;
+  say((on ? "A chair with arms: his hands go to the armrests as he sits, rest on them, and push on them to rise, as the captured sitter's did." : "A chair without arms: his hands brace on his own thighs as he sits and rises, and rest on them seated.") + (seated ? " (From his next sit.)" : ""));
+}
+chairButtons[armsOn ? "arms" : "none"].classList.add("on");
 
 // ---- the loop ----
 let t = 0, last = performance.now(), frames = 0, since = last, fps = 0, label = "";
@@ -242,4 +347,9 @@ window.hero = {
   advance(seconds) { const n = Math.round(seconds * 60); for (let i = 0; i < n; i++) { place(true); controls.update(); tick(1 / 60); } place(true); controls.update(); drawOverlay(people.inspect(HERO)); },
   render() { place(false); controls.update(); drawOverlay(people.inspect(HERO)); renderer.render(scene, camera); },
   state: () => ({ t, ...people.inspect(HERO)?.animation, sitting: hero.state().sitting?.segment ?? null, pos: hero.state().at.pos }),
+  clothes: (mode) => setClothes(mode),
+  arms: (on) => setArms(on),
+  hold: (on = true) => { holdCam = on; bHold.classList.toggle("on", on); },
+  /** a body from slider values ({ age, sex, height, build, muscle, skin (melanin 0..1) }, the rest kept) */
+  body: (v) => { for (const [k, x] of Object.entries(v)) if (k in sliderValues) { sliderValues[k] = x; sliderInputs[k].input.value = x; sliderInputs[k].out.textContent = sliderInputs[k].fmt(x); } bodyOver = { age: sliderValues.age, sex: sliderValues.sex, height: sliderValues.height, build: sliderValues.build, muscle: sliderValues.muscle, skin: skinColour(sliderValues.skin) }; rebody(); },
 };

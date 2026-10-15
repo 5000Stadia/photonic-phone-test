@@ -42,25 +42,51 @@ export function loadSitting() {
       for(let f=from;f<=to;f+=4){const src=sampleAcclaim(C,f),th=tr(src[C.index.thorax].W);turns.neck.push(mm(gaze.neck,mm(th,src[C.index.lowerneck].W)));turns.head.push(mm(gaze.head,mm(th,src[C.index.head].W)));}
       // Where the hands rest: frame by frame over the sit, each palm's place on its thigh (the share along the femur and the direction
       // round it, from up toward the outside) and how still it is (1 resting, 0 moving), closed over short gaps like the feet's.
+      // What each hand does, frame by frame over the sit: where the palm is on its own thigh (the share along the femur and the direction round it,
+      // from up toward the outside), how near it is to that thigh and how still (together: resting on it, `thigh`), and, for a take recorded on a
+      // chair with arms (spec.armrests, 113_15), how much it is on the armrest (`arm`: at the seated palms' height and side, not swinging) and how
+      // far forward along it (`fwd`, metres in the seated frame, before the rig's scale). The armrests are the chair's, not the person's: on a seat
+      // without them, makeSitting puts those hands on the sitter's own thighs instead.
+      const restMid=(spec.rest[0]+spec.rest[1])/2,O=sampleAcclaim(C,restMid)[0].P,seatedOf=p=>{const q=mv(yaw,sub(p,O));return {lat:q[0],h:p[1]-spec.floorM,fwd:q[2]};};
+      const palmOf=(src,s)=>{const h=src[C.index[s+'hand']];return h.P.map((v,k)=>(v+h.E[k])/2);},median=a=>{const q=[...a].sort((x,y)=>x-y);return q[q.length>>1];};
+      const handSpan={};
       const rest=[0,1].map(side=>{const s=side?'r':'l',out=[];
+        let restH=null,restLat=null;
+        if(spec.armrests){const hs=[],ls=[];for(let f=spec.rest[0];f<=spec.rest[1];f+=2){const q=seatedOf(palmOf(sampleAcclaim(C,f),s));hs.push(q.h);ls.push(q.lat);}restH=median(hs);restLat=median(ls);}
         for(let f=spec.segments.sitDown[0];f<=spec.segments.standUp[1];f++){
-          const a=sampleAcclaim(C,f-2),b=sampleAcclaim(C,f+2),c=sampleAcclaim(C,f),palm=src=>{const h=src[C.index[s+'hand']];return h.P.map((v,k)=>(v+h.E[k])/2);};
+          const a=sampleAcclaim(C,f-2),b=sampleAcclaim(C,f+2),c=sampleAcclaim(C,f),palm=src=>palmOf(src,s);
           const speed=Math.hypot(...sub(palm(b),palm(a)))*30,fe=c[C.index[s+'femur']],ax=sub(fe.E,fe.P),L=Math.hypot(...ax),u=ax.map(v=>v/L),pp=palm(c);
           const t=Math.max(0,Math.min(1,sub(pp,fe.P).reduce((q,v,k)=>q+v*u[k],0)/L)),r=sub(pp,fe.P.map((v,k)=>v+ax[k]*t));
           const up=[0,1,0].map((v,k)=>v-u[1]*u[k]),ul=Math.hypot(...up)||1,uu=up.map(v=>v/ul),out_=[u[1]*uu[2]-u[2]*uu[1],u[2]*uu[0]-u[0]*uu[2],u[0]*uu[1]-u[1]*uu[0]];
           // outward: away from the pelvis's middle (the same rule the rig's side uses below)
-          const mid=sub(fe.P,c[0].P),lat=out_[0]*mid[0]+out_[2]*mid[2]<0?-1:1;
-          out.push({f,t,phi:Math.atan2(r.reduce((q,v,k)=>q+v*out_[k],0)*lat,r.reduce((q,v,k)=>q+v*uu[k],0)),still:1-Math.max(0,Math.min(1,(speed-.05)/.1))});
+          const mid=sub(fe.P,c[0].P),lat=out_[0]*mid[0]+out_[2]*mid[2]<0?-1:1,q=seatedOf(pp);
+          // near the thigh: within 13 cm of the femur's axis (her thigh's girth and half a hand), none past 18
+          const near=1-Math.max(0,Math.min(1,(Math.hypot(...r)-.13)/.05));
+          out.push({f,t,phi:Math.atan2(r.reduce((q,v,k)=>q+v*out_[k],0)*lat,r.reduce((q,v,k)=>q+v*uu[k],0)),still:1-Math.max(0,Math.min(1,(speed-.05)/.1)),near,fwd:q.fwd,
+            arm:spec.armrests&&Math.abs(q.h-restH)<.05&&Math.abs(q.lat-restLat)<.06&&speed<.8?1:0});
         }
         // close gaps and drop flickers of a tenth of a second, then ease over a quarter second either way (a raised cosine), so a hand settles onto the thigh and
         // leaves it as gradually as the captured hand slows and starts
-        const R=12,S=30,n=out.length,still=out.map(o=>o.still),at=(arr,i)=>arr[Math.max(0,Math.min(n-1,i))],m=(arr,op)=>arr.map((_,i)=>{let v=arr[i];for(let j=-R;j<=R;j++)v=op(v,at(arr,i+j));return v;});
-        const closed=m(m(m(m(still,Math.max),Math.min),Math.min),Math.max),k=Array.from({length:2*S+1},(_,j)=>.5+.5*Math.cos(Math.PI*(j-S)/(S+1))),ks=k.reduce((a,b)=>a+b);
-        out.forEach((o,i)=>{let v=0;for(let j=-S;j<=S;j++)v+=k[j+S]*at(closed,i+j);o.still=v/ks;});
+        const R=12,S=30,n=out.length,at=(arr,i)=>arr[Math.max(0,Math.min(n-1,i))],m=(arr,op)=>arr.map((_,i)=>{let v=arr[i];for(let j=-R;j<=R;j++)v=op(v,at(arr,i+j));return v;});
+        const close=arr=>m(m(m(m(arr,Math.max),Math.min),Math.min),Math.max),k=Array.from({length:2*S+1},(_,j)=>.5+.5*Math.cos(Math.PI*(j-S)/(S+1))),ks=k.reduce((a,b)=>a+b);
+        const ease=arr=>arr.map((_,i)=>{let v=0;for(let j=-S;j<=S;j++)v+=k[j+S]*at(arr,i+j);return v/ks;});
+        const closed=close(out.map(o=>o.still*o.near)),thigh=ease(closed);
+        out.forEach((o,i)=>{o.still=thigh[i];});
         // the place on the thigh, eased the same way (a short stretch of a moving hand would otherwise drag the target round the thigh)
         for(const key of ['t','phi']){const v=out.map(o=>o[key]);out.forEach((o,i)=>{let a=0,w=0;for(let j=-S;j<=S;j++){const q=k[j+S]*at(closed,i+j)+1e-6;a+=q*at(v,i+j);w+=q;}o[key]=a/w;});}
+        // on the armrest: closed the same way; the hand reaches it over the 0.35 s before (a raised cosine) and leaves it over the 0.25 s after, and its
+        // place along the armrest is the captured one, smoothed over a tenth of a second, held at the first and last of the contact outside it
+        const on=close(out.map(o=>o.arm)),from=on.indexOf(1),to=on.lastIndexOf(1);
+        handSpan[side]=from<0?null:{from:out[from].f,to:out[to].f};
+        const fwd=out.map((o,i)=>{let a=0,w=0;for(let j=-6;j<=6;j++){a+=at(out,Math.max(from,Math.min(to,i+j))).fwd;w++;}return a/w;});
+        out.forEach((o,i)=>{
+          if(from<0){o.arm=0;o.fwd=0;return;}
+          let w=on[i];
+          if(!w){let d=Infinity;for(let j=Math.max(0,i-30);j<=Math.min(n-1,i+42);j++)if(on[j]){const e=j>i?(j-i)/42:(i-j)/30;if(e<d)d=e;}w=d<1?.5+.5*Math.cos(Math.PI*d):0;}
+          o.arm=w;o.fwd=fwd[Math.max(from,Math.min(to,i))];
+        });
         return out;});
-      return {spec,C,yaw,samples,gaze,turns,rest};
+      return {spec,C,yaw,samples,gaze,turns,rest,handSpan};
     }));
   })().catch(e=>{pending=null;throw e;});
 }
@@ -94,14 +120,16 @@ export const sitDuration = (spec,segment) => {const [a,b]=sitRanges(spec)[segmen
 const cache=new Map();
 // `legs`: what the hands rest on, the clothes over the thighs (garments/skirt.js thighCover: the surface's distance from the femur's axis at nine
 // shares along the thigh and four directions from straight up to straight out); left out, the bare thigh, a proportion of the height.
-export function makeSitting(bank,J,tip,height,seatHeight,clipId,legs=null) {
+// `arms`: the seat's armrests in the sit's own frame (the seat's contact at the origin, +z its facing, +x the sitter's left; population.js
+// armsOf): [left, right], each { x, y (the top's height), z0, z1 (its extent along the facing) } or null; left out, a seat without arms.
+export function makeSitting(bank,J,tip,height,seatHeight,clipId,legs=null,arms=null) {
   // Hip joint above the surface, rather than burying the hip joint in the board.
   const cushion=.09*height;
   const target=seatHeight+cushion;
   const clip=clipId ? bank.find(c=>c.spec.id===clipId) : bank.reduce((best,c)=>
     Math.abs(fittingSeatHeight(bank,J,tip,height,c.spec.id)-seatHeight)<Math.abs(fittingSeatHeight(bank,J,tip,height,best.spec.id)-seatHeight)?c:best);
   if(!clip)throw Error('sit: unknown capture');
-  const key=JSON.stringify([clip.spec.id,J,tip,seatHeight,height,legs&&Array.from(legs,v=>+v.toFixed(4))]);
+  const key=JSON.stringify([clip.spec.id,J,tip,seatHeight,height,legs&&Array.from(legs,v=>+v.toFixed(4)),arms]);
   if(cache.has(key))return cache.get(key);
   const {spec,C,yaw,samples}=clip,rig=makeSitRetarget(C,{J,tip},{origin:spec.originM,floor:spec.floorM});
   const delta=target-spec.seat.pelvisProxyM*rig.scale;
@@ -140,10 +168,15 @@ export function makeSitting(bank,J,tip,height,seatHeight,clipId,legs=null) {
     restHands(p,frame);
     return p;
   }
-  // The capture's resting hands are on her thighs (or the seat's edge beside them): ours rest on ours, at the same share along the thigh
-  // and the same side of it, on its surface (the leg's radius there, its clothes, half a hand), by two-bone IK from the shoulder with the
-  // captured hand orientation kept; as much as the capture's hand is still (moving hands keep their captured paths). Our arms and torso
-  // differ in length from hers, so captured directions alone put his hands in the air in front of his knees.
+  // The hands (Kabe, 2026-10-15: on the chair's arms when it has them; without, "dangling or using the characters own knees or legs as one
+  // would naturally do"). Where the take's hand rests on her own thigh, ours rests on ours: at the same share along the thigh and the same
+  // side of it, on its surface (the leg's radius there or its clothes, and half a hand). 113_15 was recorded on a chair with arms
+  // (loadSitting: spec.armrests): from the sit-down to the rise her palms are on its armrests, sliding along them as she lowers and rises.
+  // On a seat with arms ours are on its armrests, as far forward along them as hers were; on one without, they brace on his own thighs
+  // from the start of the sit-down (above the knees, as far down as he can reach), slide back to rest mid-thigh as he settles, and brace
+  // again as he leans forward to rise, until her hands leave the armrests. Each by two-bone IK from the shoulder with the captured hand's
+  // orientation kept, as much as the take's hand is in contact (moving hands keep their captured paths). The trunk, the legs and the timing
+  // are the capture's; only the hands follow the seat.
   // (the bare thigh with its stocking, 8 mm, or the clothes' surface: either way half a hand, 16 mm, more to the palm's middle)
   const bare=[.075,.08,.075,.06,.055].map(v=>v*height/1.75+.008);
   const thighR=(t,phi)=>{
@@ -151,24 +184,56 @@ export function makeSitting(bank,J,tip,height,seatHeight,clipId,legs=null) {
     const x=Math.max(0,Math.min(1,t))*8,i=Math.min(7,Math.floor(x)),f=x-i,y=Math.max(0,Math.min(90,phi*180/Math.PI))/30,j=Math.min(2,Math.floor(y)),g=y-j,at=(a,b)=>legs[a*4+b];
     return (at(i,j)*(1-g)+at(i,j+1)*g)*(1-f)+(at(i+1,j)*(1-g)+at(i+1,j+1)*g)*f;};
   const palmOff=[8,12].map(b=>sub(tip[b===8?'handL':'handR'],J[b]).map(v=>v*.45)),armL=[6,10].map(b=>[Math.hypot(...sub(J[b+1],J[b])),Math.hypot(...sub(J[b+2],J[b+1]))]);
+  // without arms: braced above the knees (a share of 0.78 along the thigh, 20 degrees out from its top) in the sit-down and the rise, resting
+  // mid-thigh (0.5, 31 degrees) on the seat, the one sliding into the other over the half second before the seated stretch and after it
+  const BRACE=[.78,.35],REST=[.5,.55],smooth=x=>{const v=Math.max(0,Math.min(1,x));return v*v*(3-2*v);};
+  const braceAt=f=>f<spec.rest[0]?1-smooth((f-spec.rest[0]+60)/60):f>spec.rest[1]?smooth((f-spec.rest[1])/60):0;
+  // the rig's seated pelvis, forward along the seat: the take's palm moved along her armrest in her seated frame
+  const seatedZ=raw((spec.rest[0]+spec.rest[1])/2).P[0][2];
   function restHands(p,frame) {
     for(let side=0;side<2;side++) {
       const rs=clip.rest[side],i=Math.round(frame)-rs[0].f;if(i<0||i>=rs.length)continue;
-      const o=rs[i],c=o.still;
+      const o=rs[i],span=clip.handSpan?.[side],arm=arms?.[side];
       const hip=side?17:13,a=p.P[hip],b=p.P[hip+1],ax=sub(b,a),L=Math.hypot(...ax),u=ax.map(v=>v/L);
       const up=[0,1,0].map((v,k)=>v-u[1]*u[k]),ul=Math.hypot(...up)||1,uu=up.map(v=>v/ul);
       let out=[u[1]*uu[2]-u[2]*uu[1],u[2]*uu[0]-u[0]*uu[2],u[0]*uu[1]-u[1]*uu[0]];
       // outward is away from the pelvis's middle
       const mid=sub(a,p.P[0]);if(out[0]*mid[0]+out[2]*mid[2]<0)out=out.map(v=>-v);
       const hb=side?12:8,sh=hb-2,W=p.W[hb],off=mv(W,palmOff[side]),fk=p.P[hb];
-      let wrist=fk;
-      if(c>1e-3){const r=thighR(o.t,o.phi)+.016,dir=uu.map((v,k)=>v*Math.cos(o.phi)+out[k]*Math.sin(o.phi)),palm=a.map((v,k)=>v+ax[k]*o.t+dir[k]*r);
-        wrist=fk.map((v,k)=>v+(palm[k]-off[k]-v)*c);}
+      const onThigh=(t,phi)=>{const r=thighR(t,phi)+.016,dir=uu.map((v,k)=>v*Math.cos(phi)+out[k]*Math.sin(phi));return a.map((v,k)=>v+ax[k]*t+dir[k]*r);};
+      let w=0,target=null,onArm=0;
+      if(span) {
+        if(arm){
+          w=onArm=o.arm;
+          if(w>1e-3){
+            // as far along the armrest as hers was; where that is out of his reach (his shoulders sit higher and further back than hers),
+            // the nearest place toward his shoulder that is in reach, so the hand lands as soon as it can and slides back as he lowers
+            const lo=arm.z0+.05,hi=arm.z1-.03,zc=Math.max(lo,Math.min(hi,seatedZ+o.fwd*rig.scale)),S=p.P[sh],reach=.985*(armL[side][0]+armL[side][1]);
+            const far=z=>Math.hypot(arm.x-off[0]-S[0],arm.y+.016-off[1]-S[1],z-off[2]-S[2])>reach,zs=Math.max(lo,Math.min(hi,S[2]+off[2]));
+            let z=zc;if(far(z)){z=zs;for(let k=1;k<=12;k++){const zz=zc+(zs-zc)*k/12;if(!far(zz)){z=zz;break;}}}
+            target=[arm.x,arm.y+.016,z];
+          }
+        }
+        else {
+          w=frame<span.from?1:o.arm;
+          if(w>1e-3){
+            const br=braceAt(frame),phi=REST[1]+(BRACE[1]-REST[1])*br,reach=.97*(armL[side][0]+armL[side][1])+Math.hypot(...palmOff[side]);
+            // as far down the thigh as he can reach from the shoulder (upright at the start of the sit-down, his hands are on the front of the thigh)
+            let t=REST[0]+(BRACE[0]-REST[0])*br;
+            while(t>.3&&Math.hypot(...sub(onThigh(t,phi),p.P[sh]))>reach)t-=.04;
+            target=onThigh(t,phi);
+          }
+        }
+      }
+      // resting on his own thigh where hers rested on hers
+      if(o.still>w){w=o.still;target=onThigh(o.t,o.phi);}
+      let wrist=w>1e-3?fk.map((v,k)=>v+(target[k]-off[k]-v)*w):fk;
       // a moving hand that passes over the thigh keeps out of it (and out of the clothes on it): the captured hand went by a bare thigh
       if(legs){const q=sub(wrist.map((v,k)=>v+off[k]),a),t=(q[0]*u[0]+q[1]*u[1]+q[2]*u[2])/L,rad=q.map((v,k)=>v-u[k]*t*L),d=Math.hypot(...rad);
         // (faded in over the thigh's ends and the edges of its top and outside, so a hand coming over them is lifted gradually)
         const phi=Math.atan2(rad[0]*out[0]+rad[1]*out[1]+rad[2]*out[2],rad[0]*uu[0]+rad[1]*uu[1]+rad[2]*uu[2]),ramp=(x,e0,e1)=>{const v=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return v*v*(3-2*v);};
-        const fade=ramp(t,0,.1)*ramp(t,1,.9)*ramp(phi,-Math.PI/6,-Math.PI/18)*ramp(phi,2*Math.PI/3,5*Math.PI/9),need=fade>0?(thighR(t,phi)+.016)*fade:0;
+        // (not for a hand on an armrest: it rests there, whatever the clothes' bulk below it)
+        const fade=ramp(t,0,.1)*ramp(t,1,.9)*ramp(phi,-Math.PI/6,-Math.PI/18)*ramp(phi,2*Math.PI/3,5*Math.PI/9)*(1-onArm),need=fade>0?(thighR(t,phi)+.016)*fade:0;
         if(d>1e-6&&d<need)wrist=wrist.map((v,k)=>v+rad[k]/d*(need-d));}
       if(wrist!==fk)armTo(p,sh,wrist,armL[side]);
     }
@@ -176,8 +241,8 @@ export function makeSitting(bank,J,tip,height,seatHeight,clipId,legs=null) {
   const motion={spec,report,J,pose,samples,durations:Object.fromEntries(SIT_SEGMENTS.map(s=>[s,sitDuration(spec,s)]))};
   // Reject substantial pose changes, rather than stretching the captured action
   // to an unsuitable seat. Sample the source lattice before starting a trip.
-  // (the hands rest on the clothes: the legs and the seat are the bare sit's, already sampled)
-  const started=performance.now(),bareSit=legs&&makeSitting(bank,J,tip,height,seatHeight,clip.spec.id);
+  // (the hands rest on the clothes or the armrests: the legs and the seat are the bare sit's, already sampled)
+  const started=performance.now(),bareSit=(legs||arms)&&makeSitting(bank,J,tip,height,seatHeight,clip.spec.id);
   if(bareSit)Object.assign(report,bareSit.report);
   else for(const segment of SIT_SEGMENTS)for(let f=0;f<=SIT_FRAMES;f+=8) {
     const sample=samples[segment][f];pose(sample.frame,sample.source);

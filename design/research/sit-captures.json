@@ -37,6 +37,14 @@
         390,
         500
       ],
+      "armrests": {
+        "note": "her chair had arms: from the sit-down (right hand frame 201, left 221) to the rise (651) both palms rest 0.61 m above the floor, 0.29-0.33 m either side of the pelvis's midline and 20-30 cm outside her thighs' axes, still through the seated stretch and sliding along the armrests as she lowers and rises (hero-motion-2, 2026-10-15). sitting.js reads the contact from this; 13_05 and 13_01 have none.",
+        "palmHeightM": 0.611,
+        "palmLateralM": [
+          0.331,
+          -0.292
+        ]
+      },
       "later": [],
       "floorM": -0.00347,
       "footBaselineM": [

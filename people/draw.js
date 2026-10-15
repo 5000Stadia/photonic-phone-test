@@ -42,7 +42,7 @@ import { TEMPLATE, NEAR, B, morphBasis } from "./bodies.js";
 import { bakePacedCycle, PACE_FRAMES, writePose } from "./walk.js";
 import { half, bitsOf, packHalf } from "./half.js";
 import { wearMask } from "./outfits.js";
-import { UVN } from "../spikes/makehuman/index.js";
+import { UVN, BASE_LAYER } from "../spikes/makehuman/index.js";
 import { outfitLayout, bakeNear, bakeReduced, farReducedPositions } from "./garments/reduced.js";
 import { OUTFITS } from "./garments/outfit.js";
 import { makeSkirtGPU, writeSpecRow, SPEC_TEXELS } from "./garments/skirt-tsl.js";
@@ -55,7 +55,11 @@ const LATER_AFTER_UPDATES = 4;               // compile()'s deferred classes sta
 const BAND_SHADE = 0.62;                   // kind 7's colour: the skirt's, this much of it (the working man's knee band)
 const DRESSED_FAR_CAP = 512;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's and the workman's, half as many: the same textures). 256 until the working dress: with four in five dressed, a plaza of 300 has about 340 blocks
 
-export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4, quality, overflow = "demote" } = {}) {
+// `review`: the animation review page (lab/hero-motion; Kabe, 2026-10-15: "for this development nude would be appropriate ... for how clothes lay,
+// an accurate body model is necessary"): a near person whose `reviewBody` is 1 is drawn without the base layer and with no stockings or shoes
+// painted on, the body as MakeHuman shapes it (smooth and featureless at the groin, as its base mesh is; nothing is added there), and at 2 in
+// the base layer only. Off, as everywhere but that page, no draw can show anyone unclothed (shape.js: the base layer is always built).
+export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4, quality, overflow = "demote", review = false } = {}) {
   const setOverflow = (value) => {
     if (value !== "demote" && value !== "main") throw new Error("people: overflow must be demote or main");
     overflow = value;
@@ -294,9 +298,19 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const paint = attribute("paint", "vec4");        // rgb + kind: 0 the person's skin, 1 the base layer's tint, 2 its own colour (eyes), and for a dressed class 3 the bodice, 4 the skirt, 5 the shift (its own colour), 6 the stockings, 7 the skirt's colour darkened (a knee band)
     const bodyEnd = tier === "near" ? NEAR.V : V;          // the class meshes' body is the tier's own mesh (outfitLayout checks it)
     const col = (k) => textureLoad(agentTex, ivec2(k, i)).rgb;
-    if (!outfit) m.colorNode = varying(mix(mix(col(3), col(2), step(0.5, paint.w)), paint.rgb, step(1.5, paint.w)));
+    // the review page (makeDraw `review`), per person in the agent row's texel 1 w: 0 as worn; 1 nude (the base layer dropped, the body's painted
+    // stockings and shoes shown as skin); 2 the undergarments (the base layer kept, the legs and feet bare)
+    const rv = review && tier === "near" ? textureLoad(agentTex, ivec2(1, i)).w : null, vi = rv ? int(vertexIndex) : null;
+    const bare = rv ? vi.lessThan(int(UVN)).and(rv.greaterThan(0.5)) : null, layerV = rv ? vi.greaterThanEqual(int(UVN)).and(vi.lessThan(int(UVN + BASE_LAYER.count))) : null;
+    const kind = bare ? select(bare, float(0), paint.w) : paint.w;
+    // what the review drops of the layer: all of it nude; in the undergarments, the legs below a clean hem (the helper's own crop is a stepped
+    // line 6 cm high round each thigh): the rest pose's height, a share of the person's, under 0.41 (above the highest step, 0.403, on L17)
+    const restShare = rv ? TSL.varyingProperty("float", `restShare_${outfit ? "dressed" : "base"}`) : null;
+    const dropReview = rv ? varying(select(layerV.and(rv.greaterThan(0.5)).and(rv.lessThan(1.5)), float(1), float(0))).greaterThan(0.5)
+      .or(varying(select(layerV.and(rv.greaterThan(1.5)), float(1), float(0))).greaterThan(0.5).and(restShare.lessThan(0.41))) : null;
+    if (!outfit) m.colorNode = varying(mix(mix(col(3), col(2), step(0.5, kind)), paint.rgb, step(1.5, kind)));
     else {
-      const k = paint.w, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k).mul(float(1).sub(step(5.5, k))));      // (kind 7, the garment's band: the skirt's colour a shade darker, below)
+      const k = kind, own = step(1.5, k).mul(float(1).sub(step(2.5, k))).add(step(4.5, k).mul(float(1).sub(step(5.5, k))));      // (kind 7, the garment's band: the skirt's colour a shade darker, below)
       let c = mix(col(3), col(2), step(0.5, k).mul(float(1).sub(step(1.5, k))));                       // skin, or the tint (kind 1)
       c = mix(c, col(4), step(2.5, k).mul(float(1).sub(step(3.5, k))));                                 // the bodice
       c = mix(c, col(5), step(3.5, k).mul(float(1).sub(step(4.5, k))));                                 // the skirt
@@ -312,16 +326,18 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const upperSurface = outfit ? textureLoad(agentTex, ivec2(2, i)).w : float(0);
     const lowerSurface = outfit ? textureLoad(agentTex, ivec2(6, i)).w : float(0);
     const fabric = varying(select(paint.w.equal(3), upperSurface, select(paint.w.equal(4).or(paint.w.equal(7)), lowerSurface, float(0))));
-    applySurface(THREE, m, { tier, quality, point: surfacePoint, kind: paint.w, fabric });
+    applySurface(THREE, m, { tier, quality, point: surfacePoint, kind, fabric });
     const walk = walkNode();
     const gstore = outfit ? garmentStore(e.kind) : null;
     const skirt = outfit ? skirtOf(e.shared) : null;           // every dressed class's program has the skirt's branch; the classes without the skirt worn have no skirt vertices in their index
     // the layer's neck cut, near: the body slot's w at the layer's vertices; the fragment is discarded where it is above the shift's edge
+    // (and the review page's nude person: the base layer's vertices, after the drawn body's, dropped)
     if (outfit && tier === "near") {
       const gi = int(textureLoad(agentTex, ivec2(1, i)).y).mul(store.V).add(int(vertexIndex)).mul(2), cutLoad = textureLoad(store.tex, ivec2(gi.mod(REST_W), gi.div(REST_W)));
       store.nodes.push(cutLoad);
-      m.maskNode = varying(select(int(vertexIndex).lessThan(bodyEnd), cutLoad.w, float(0))).lessThanEqual(0);
-    }
+      const keep = varying(select(int(vertexIndex).lessThan(bodyEnd), cutLoad.w, float(0))).lessThanEqual(0);
+      m.maskNode = dropReview ? keep.and(dropReview.not()) : keep;
+    } else if (dropReview) m.maskNode = dropReview.not();
     m.positionNode = Fn(() => {
       const a0 = textureLoad(agentTex, ivec2(0, i)).toVar(), a1 = textureLoad(agentTex, ivec2(1, i)).toVar();
       const x0 = vec3(0).toVar(), n0 = vec3(0).toVar(), vi = int(vertexIndex);
@@ -371,6 +387,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       // Person-local coordinates: texture detail moves with the person, never the stage.
       surfacePoint.assign(p.div(textureLoad(agentTex, ivec2(3, i)).w.max(0.1)));
+      if (restShare) restShare.assign(x0.y.div(textureLoad(agentTex, ivec2(3, i)).w.max(0.1)));
       const ch = cos(a0.z), sh = sin(a0.z);
       normalLocal.assign(vec3(n.x.mul(ch).add(n.z.mul(sh)), n.y, n.z.mul(ch).sub(n.x.mul(sh))).normalize());
       return vec3(p.x.mul(ch).add(p.z.mul(sh)).add(a0.x), p.y.add(a1.z), p.z.mul(ch).sub(p.x.mul(sh)).add(a0.y));
@@ -497,7 +514,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   function idlerOf(rec, m) {
     if (!m.idler) {
       const v = rec.values;
-      m.idler = makeIdleWalker(rec.far.J, { age: v.age, seed: rec.seed, build: rec.bodyParams.build, keepout: rec.dressing?.keepout ?? null });
+      m.idler = makeIdleWalker(rec.far.J, { age: rec.bodyParams.age ?? v.age, seed: rec.seed, build: rec.bodyParams.build, keepout: rec.dressing?.keepout ?? null });
       m.scratch = { J: m.idler.J, Dj: m.idler.Dj, legs: m.idler.legs, sole: m.idler.sole, Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3) };
     }
     return m.idler;
@@ -704,7 +721,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       const o = (rowBase + n) * texels * 4, pos = rec.pos;
       D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = anim.phase;
-      D[o + 4] = anim.slot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
+      D[o + 4] = anim.slot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1]; D[o + 7] = review ? rec.reviewBody : 0;
       const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
       D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       D[o + 15] = rec.height;
