@@ -1,3 +1,5 @@
+import {loadSitting,makeSitting,fittingSeatHeight} from "./people/sitting.js";
+import {paramsFor,build} from "./people/bodies.js";
 import { peopleQuality } from "./people/quality.js";
 // The lineup (R5, "Done when: the lineup"): thirty people from age 0 to 90, of every build, each dressed for 1660 from their own words ("a girl of 8 in a red dress" is a girl in a red dress).
 // Everyone is drawn at the near tier (they are close); drag to look around, pinch or scroll to zoom. Standing, or walking in place. The cast and its words are cast.js; the words become a dress in
@@ -81,14 +83,41 @@ const els = cast.map((c, i) => {
 const nav = document.getElementById("nav");
 const mk = (text, on) => { const b = document.createElement("button"); b.textContent = text; b.addEventListener("click", on); nav.append(b); return b; };
 const home = document.createElement("a"); home.href = "./"; home.textContent = "← lab"; nav.prepend(home);
-let walking = false, settling = false;
+let walking = false, settling = false, sitting = false;
+const seats = [], seatMeshes = new THREE.Group(), sitPending = new Set(); scene.add(seatMeshes); seatMeshes.visible=false;
 const bStand = mk("Standing", () => setWalking(false)), bWalk = mk("Walking in place", () => setWalking(true));
+const bSit = mk("Sitting", async () => {
+  sitting=true;walking=settling=false;bSit.classList.add('on');bStand.classList.remove('on');bWalk.classList.remove('on');
+  const bank=await loadSitting();
+  if(!sitting)return;
+  if(!seats.length)cast.forEach((c,i)=>{
+    const h=c.derived['body.height']/100,stool=c.values.age>=15&&i%3===0;
+    const {J,tip}=build(paramsFor(c.values,c.derived)).joints,height=fittingSeatHeight(bank,J,tip,h,stool?'13_01':'113_15'),m=makeSitting(bank,J,tip,h,height),p=m.pose(m.spec.segments.sitDown[0]).P[0],home=place(i);
+    const seat={id:'lineup-seat-'+i,floor:0,contact:[home[0]-p[0],home[2]-p[2]],height,facing:0,width:c.values.age<15?Math.max(.55,h*.45):Math.max(.3,h*.34),depth:h*.24};
+    seats.push(seat);
+    const material=new THREE.MeshStandardMaterial({color:0x79664e,roughness:1});
+    const board=new THREE.Mesh(new THREE.BoxGeometry(seat.width,.035,seat.depth),material);board.position.set(seat.contact[0],height-.0175,seat.contact[1]);seatMeshes.add(board);
+    for(const x of [-1,1])for(const z of [-1,1]){const leg=new THREE.Mesh(new THREE.BoxGeometry(.025,height,.025),material);leg.position.set(seat.contact[0]+x*(seat.width/2-.03),height/2,seat.contact[1]+z*(seat.depth/2-.03));seatMeshes.add(leg);}
+  });
+  seatMeshes.visible=true;
+  handles.forEach((p,i)=>{p.goTo({pos:p.where().pos});beginSit(i);});
+});
+async function beginSit(i) {
+  if(sitPending.has(i))return; sitPending.add(i);
+  try {await handles[i].sit(seats[i]);} catch(e){errors.push(String(e));} finally {sitPending.delete(i);}
+}
+function loopSitting() {
+  handles.forEach((p,i)=>{const s=p.state().sitting;
+    if(!s)beginSit(i);else if(s.segment==='seated'&&s.time>=3)p.stand();
+  });
+}
 const bCap = mk("Captions", () => { tags.classList.toggle("off"); bCap.classList.toggle("on"); }); bCap.classList.add("on");
 if (camera.aspect < 1) { tags.classList.add("off"); bCap.classList.remove("on"); }          // a phone held upright: thirty captions will not fit across; Details lists them, and Captions shows them to read up close
 const bList = mk("Details", () => { list.classList.toggle("on"); bList.classList.toggle("on"); });
 mk("Front", () => view(VIEW));
 mk("Close", () => view([[0, 1.5, 4.2], [0, 0.9, -0.6]]));
 function setWalking(on) {
+  sitting=false;seatMeshes.visible=false;bSit.classList.remove('on');handles.forEach(p=>p.stand());
   walking = on; settling = !on;
   bWalk.classList.toggle("on", on); bStand.classList.toggle("on", !on);
   if (on) cast.forEach((c, i) => { if (c.values.age >= 0.9) { const p = place(i); handles[i].goTo({ pos: [p[0], 0, p[2] + 60] }, { inPlace: true }); } });
@@ -99,7 +128,7 @@ bStand.classList.add("on");
 function settle() {
   let any = false;
   cast.forEach((c, i) => {
-    const s = handles[i].state(); if (!s.doing) return;
+    const s = handles[i].state(); if (!s.doing || s.sitting) return;
     any = true;
     const ph = s.phase; let d = ph - STAND; d -= Math.floor(d);        // how far past the standing phase, in cycles
     if (d < 0.03) { handles[i].goTo({ pos: s.at.pos }, {}); }          // arrives where they stand: the feet stay at this phase
@@ -124,6 +153,7 @@ function frame(now) {
   controls.update();
   counts = people.tick(t, dt, camera); people.events();
   if (settling) settle();
+  if (sitting && seats.length) loopSitting();
   renderer.render(scene, camera);
   tagsAt();
   frames++;

@@ -209,7 +209,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
       need[2].assign(select(i.greaterThan(3), max(need[2], sp), need[2]));
     });
     const R0 = [-1, 0, 1].map((d) => max(raw(d).design, need[d + 1]).toVar());
-    return max(R0[1], R0[0].add(R0[2]).mul(0.5));
+    return max(R0[1], R0[0].add(R0[2]).mul(0.5)).add(select(rig.S(0).w.greaterThan(0).and(rig.shrt.greaterThan(.5)),rig.H.mul(.035),float(0)));
   }
 
   // ---- the render-to-texture passes ----
@@ -261,7 +261,11 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const dirAt = (frm, cc) => { const th = float(cc).div(A_).mul(TAU); return cross(frm.f, frm.n).mul(sin(th)).add(frm.f.mul(cos(th))); };
     const wrap = (cc) => select(cc.lessThan(int(0)), cc.add(int(A)), select(cc.greaterThanEqual(int(A)), cc.sub(int(A)), cc));
     const hem = rig.hemY;
-    const posAt = (frm, kk, cc) => { const p = frm.c.add(dirAt(frm, cc).mul(R2(person, kk, wrap(cc)))); return vec3(p.x, max(p.y, hem), p.z); };
+    const posAt = (frm, kk, cc) => { const p = frm.c.add(dirAt(frm, cc).mul(R2(person, kk, wrap(cc)))); const seat=rig.S(0).w,edge=rig.S(1).w,top=seat.add(.004);
+      const active=seat.greaterThan(0),lap=kk.lessThanEqual(int(R_KNEE)).or(rig.shrt.greaterThan(.5));
+      const y=select(active.and(lap).and(p.z.lessThanEqual(edge)),max(p.y,top),p.y);
+      const z=select(active.and(lap.not()).and(p.y.lessThan(top.add(.03))),max(p.z,edge.add(.004)),p.z);
+      return vec3(p.x,max(y,hem),z); };
     const p0 = posAt(f0, kInt, cInt).toVar();
     const pj1 = posAt(f0, kInt, cInt.add(int(1))), pj0 = posAt(f0, kInt, cInt.sub(int(1))), pk0 = posAt(fU, kU, cInt), pk1 = posAt(fD, kD, cInt);
     let nrm = cross(pj1.sub(pj0), pk1.sub(pk0));

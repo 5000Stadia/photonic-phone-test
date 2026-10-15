@@ -177,11 +177,11 @@ export function writeBones(w, phase, out, o) {
   writePose(w, out, o);
 }
 const textureQuaternion = new Float32Array(4), textureQuaternionBits = bitsOf(textureQuaternion);
-function writePose(w, out, o) {
+export function writePose(w, out, o) {
   const J = w.J, Wm = w.Wm, Pm = w.Pm;
   for (let b = 0; b < B; b++) {
     const mo = b * 9, j = J[b], k = o + b * 8;
-    if (w.bank) {
+    if (w.bank && !w.rotationPose) {
       // Newton polar iteration: nearest proper rotation of the blended captures.
       // Capture pairs stay far from the singular/opposite-rotation case.
       for(let iteration=0;iteration<5;iteration++) {

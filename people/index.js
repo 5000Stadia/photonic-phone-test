@@ -1,7 +1,7 @@
 // makePeople (design/interface.md, agreed with holo-emitter 2026-10-11): one population per world. It owns every
 // person's drawing, tiers and per-frame work; a person is a handle of commands and data, never a scene object.
 // Built in R4 over population.js (data) and draw.js (three instanced tiers). What waits for later milestones answers
-// honestly: sit/stand/use (M4) return false; perceives() is empty until M4's perception; say() keeps the speech
+// honestly: use (M4) returns false; perceives() is empty until M4's perception; say() keeps the speech
 // contract's timing and events now, and the face that speaks arrives with M5.
 
 import { clearOutfitCaches } from "./garments/outfit.js";
@@ -55,7 +55,7 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
       where: () => pop.where(id),
       goTo: (target, opts) => pop.goTo(id, target, opts),
       face: (target) => pop.face(id, target),
-      sit: () => false, stand: () => false, use: () => false,          // M4, through works.js
+      sit: (thing, opts) => pop.sit(id, thing, opts), stand: () => pop.stand(id), use: () => false,          // M4, through works.js
       say(line, { to = null, clock = null, duration = null } = {}) {
         if (speaking.has(id)) extra.push({ type: "said_end", id, line: speaking.get(id).line, interrupted: true });
         const d = duration ?? Math.max(0.6, String(line).split(/\s+/).filter(Boolean).length / WORDS_PER_SECOND);

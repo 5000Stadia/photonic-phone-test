@@ -14,8 +14,7 @@ export function makeSitRetarget(C,{J,tip},{origin=C.frames[0][0].P,floor=0}={}) 
   const child=BONES.findIndex(([,pa])=>pa===b),end=child<0?tip[BONES[b][0]]:J[child];
   return turn(sub(end,J[b]),C.bones[s].offset);
  });
- function pose(frameNumber) {
-  const source=sampleAcclaim(C,frameNumber);
+ function pose(frameNumber, source=sampleAcclaim(C,frameNumber)) {
   const W=[],P=[];
   for(let b=0;b<BONES.length;b++){W[b]=mm(source[map[b]].W,rest[b]);const pa=BONES[b][1];
    P[b]=pa<0?source[0].P.map((v,k)=>(v-(k===1?floor:origin[k]))*scale):mv(W[pa],sub(J[b],J[pa])).map((v,k)=>v+P[pa][k]);}

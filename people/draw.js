@@ -1,3 +1,4 @@
+import {sittingBake,SIT_SEGMENTS} from './sitting.js';
 import { cycleAt, needsWalkBake, advanceBakedPhase, canRebakeAtPhase, childCycles, closestCycle } from "./walk-cache.js";
 import { desiredSpeed } from './pace-walk.js';
 import { walkSample } from './walk-sample.js';
@@ -402,6 +403,34 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     state.blend = cycle.blend; state.speed = cycle.speed; state.stride = cycle.stride;
     rec.walkSlot = slot; walkCounts.levelSwitches++;
   }
+  const seatedSlots = new WeakMap();
+  const sitCounts = {bakes:0,ms:0,slots:0};
+  function releaseSitting(rec) {
+    const state=seatedSlots.get(rec);if(!state)return;
+    if(state.base!==undefined){freeWalk.push({slot:state.base,count:3});walkCounts.slots-=3;sitCounts.slots-=3;}
+    seatedSlots.delete(rec);
+  }
+  function sittingSlot(rec) {
+    if(!rec.sitting){releaseSitting(rec);return null;}
+    if(!rec.sitMotion)return null;
+    let state=seatedSlots.get(rec);
+    if(!state){state={motion:rec.sitMotion,bake:sittingBake(rec.sitMotion)};seatedSlots.set(rec,state);}
+    if(state.base===undefined) {
+      if(budgetLeft<=0)return null;
+      const start=performance.now(),done=state.bake.step(start+budgetLeft);
+      budgetLeft-=performance.now()-start;
+      if(!done)return null;
+      const base=allocateWalk(3);if(base<0)return null;
+      state.base=base;sitCounts.slots+=3;sitCounts.bakes++;sitCounts.ms+=state.bake.ms;
+      state.bake.rows.forEach((rows,i)=>{
+        const slot=base+i,bx=slot%perRow*(F+1),by=Math.floor(slot/perRow)*2*B,bits=bitsOf(rows);
+        for(let r=0;r<2*B;r++)packHalf(walkData,((by+r)*walkW+bx)*4,bits,r*(F+1)*4,(F+1)*4);
+      });
+      state.bake=null;walkDirty=true;
+    }
+    const segment=SIT_SEGMENTS.indexOf(rec.sitting.segment);
+    return segment<0?null:{slot:state.base+segment,phase:Math.min(1,rec.sitting.time/state.motion.durations[rec.sitting.segment])};
+  }
   function walkSlot(rec) {
     const w = rec.walker;
     if (!w) return false;
@@ -476,6 +505,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     for (const rec of list) {
       if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) { if (overflow === "main") break; demoted.push(rec); continue; }
       if (!walkSlot(rec)) continue;
+      const seated = sittingSlot(rec);
+      if(rec.sitting && SIT_SEGMENTS.includes(rec.sitting.segment) && !seated)continue;
       let ex = 0, gslot = 0;
       if (name === "near") {
         if (!store.slots.has(rec.id) && budgetLeft <= 0) { demoted.push(rec); continue; }
@@ -490,8 +521,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit, rec.far.J).bodice; });
       }
       const o = (rowBase + n) * texels * 4, pos = rec.pos;
-      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = rec.walkPhase ?? rec.phase;
-      D[o + 4] = rec.walkSlot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
+      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = seated?.phase ?? rec.walkPhase ?? rec.phase;
+      D[o + 4] = seated?.slot ?? rec.walkSlot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
       const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
       D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       D[o + 15] = rec.height;
@@ -506,6 +537,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         if (e.skirt) {
           const sd = e.skirt.specData, row = specRow(rec), at = sh.blocks * SPEC_TEXELS * 4;
           sd.set(row, at);
+          for(let t=0;t<tubes;t++) {
+            const base=at+t*SPEC_TEXELS*4,s=rec.sitting;
+            sd[base+3]=seated?s.seat.height:0;
+            sd[base+7]=seated?(s.seat.depth??.4)/2:0;
+          }
           for (let t = 0; t < tubes; t++) sd[at + (t * SPEC_TEXELS + 33) * 4 + 2] = rowBase + n;          // (each block's leg is in the row; which person is theirs is this frame's)
           sh.blocks += tubes;
         }
@@ -612,6 +648,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; walkCounts.uploadFrames++; }
       counts.walk = { ...walkCounts, textureBytes: walkData.byteLength };
+      counts.sitting = {...sitCounts, bytesPerSitter:3*(F+1)*B*2*4*2};
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       contact.end();
       counts.contactDraws = contact.mesh.count ? 1 : 0;
@@ -688,6 +725,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     },
     /** Free a removed person's slots. */
     release(rec) {
+      releaseSitting(rec);
       if (rec.walkSlot !== undefined) { const state = bakedCycles.get(rec);
         freeWalk.push({slot:state.base, count:state.count}); walkCounts.slots -= state.count;
         if (state.spare !== undefined && state.spare >= 0) {

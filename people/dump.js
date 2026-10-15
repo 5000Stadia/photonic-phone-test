@@ -36,7 +36,7 @@ export function dumpPeople(records) {
     const gaps = [...attire.notDrawn, ...attire.drawn.filter(g => g.as !== g.kind)];
     const notDrawn = gaps.length ? `; notDrawn=[${gaps.map(g => atom(g.kind)).sort(compare).join(",")}]` : "";
     const garments = stated.map(g => `${atom(g.kind)}:${Object.keys(g.aspects).sort().map(k => `${atom(k)}=${atom(g.aspects[k])}`).join(",")}`).sort(compare);
-    const activity = rec.doing?.verb === "goTo" ? `walking destination=${destination(rec.doing.target)}`
+    const activity = rec.sitting ? `sitting seat=${value(rec.sitting.seat.id)} place=${rec.sitting.place} capture=${value(rec.sitting.clip)} segment=${rec.sitting.segment} time=${decimal(rec.sitting.time)}` : rec.doing?.verb === "goTo" ? `walking destination=${destination(rec.doing.target)}`
       : rec.doing?.verb === "sit" ? "sitting" : "standing";
     return `${value(rec.id)}; recipe=${value(rec.res.recipe.said)}; seed=${value(rec.seed)}; room=${value(rec.room)}; position=${vector(rec.pos)}; facing=${decimal(rec.heading)}; ${activity}; garments=[${garments.join("|")}]${notDrawn}; hair=${value(rec.hair.style)}:${vector(rec.hair.colour)}`;
   }).join("\n");

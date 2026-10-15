@@ -1,3 +1,5 @@
+import {seatPlace} from './seats.js';
+import {loadSitting,makeSitting} from './sitting.js';
 import {desiredSpeed,setWalkSpeed} from './pace-walk.js';
 // The population's data layer (R4; design/r4-plan.md): the people store, ranks, tiers, walking, presence, rooms, state,
 // events and hit, in pure JS with no three.js, so node tests it. draw.js reads what tick() returns; index.js wires the
@@ -26,6 +28,7 @@ class Person {
   constructor(f, env) {
     this.id = f.id; this.doc = f.doc; this.seed = f.seed; this.res = f.res; this.values = f.res.values; this.rank = f.rank;
     this.pos = f.pos; this.floor = f.floor; this.room = f.room; this.heading = f.heading; this.phase = f.phase;
+    this.sitting = null; this.sitMotion = null; this.sitToken = 0; this.afterStand = null;
     this.doing = null; this.holding = f.holding; this.presence = f.presence; this.tier = null; this.seen = false;
     this.height = f.height; this.lastClock = f.lastClock; this.goToken = 0; this.half = Math.max(0.18, 0.13 * f.height);
     this.env = env; this.gone = false;
@@ -176,7 +179,84 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     hold(rec);
     if (st.doing?.verb === "goTo") goTo(id, st.doing.target, st.doing.opts);
     if(st.paceState) {rec.paceState={...st.paceState};if(rec.walker?.bank)setWalkSpeed(rec.walker,rec.paceState.speed);}
+    if (st.sitting) {
+      rec.sitting = structuredClone(st.sitting);
+      rec.afterStand = st.afterStand ? structuredClone(st.afterStand) : null;
+      if (rec.sitting.segment !== 'approach') rec.doing = {verb:'sit'};
+      prepareSit(rec).catch(error=>queue.push({type:'sit_error',id:rec.id,reason:error.message}));
+    }
     return rec;
+  }
+
+  async function prepareSit(rec) {
+    const sitting=rec.sitting,bank=await loadSitting();
+    if(rec.gone || rec.sitting!==sitting)return false;
+    const {J,tip}=rec.body.joints;
+    rec.sitMotion=makeSitting(bank,J,tip,rec.height,sitting.seat.height,sitting.clip);
+    sitting.clip=rec.sitMotion.spec.id;
+    return true;
+  }
+  async function sit(id,thing,opts={}) {
+    const rec=people.get(String(id));if(!rec)return false;
+    const place=seatPlace(ctx,thing,rec.id,opts.place);
+    if(rec.sitting)return false;
+    catchUp(rec);
+    const token=++rec.sitToken;
+    rec.sitting={...place,segment:'approach',time:0,clip:null};
+    try {if(!await prepareSit(rec)||rec.sitToken!==token)return false;}
+    catch(error){rec.sitting=null;rec.sitMotion=null;throw error;}
+    if(!rec.sitMotion.fits) {
+      queue.push({type:'sit_unfit',id:rec.id,seat:place.seat.id,report:{...rec.sitMotion.report}});
+      rec.sitting=null;rec.sitMotion=null;return false;
+    }
+    const p=rec.sitMotion.pose(rec.sitMotion.spec.segments.sitDown[0]).P[0];
+    const h=place.seat.facing,c=Math.cos(h),s=Math.sin(h);
+    const y=ctx.floorAltitude?.(place.floor) ?? rec.pos[1];
+    const target={pos:[place.contact[0]+c*p[0]+s*p[2],y,place.contact[1]-s*p[0]+c*p[2]],floor:place.floor};
+    const sitting=rec.sitting;
+    rec.sitting=null;
+    const atSeat=Math.hypot(rec.pos[0]-target.pos[0],rec.pos[2]-target.pos[2])<.05 && rec.floor===target.floor;
+    const ok=atSeat ? (rec.doing=null,++rec.goToken,true) : goTo(id,target,{pace:opts.pace??1});
+    rec.sitting=sitting;
+    if(!ok){rec.sitting=null;rec.sitMotion=null;return false;}
+    return true;
+  }
+  function stand(id) {
+    const rec=people.get(String(id));if(!rec?.sitting)return false;
+    catchUp(rec);++rec.sitToken;
+    if(['approach','turn'].includes(rec.sitting.segment)) {rec.sitting=null;rec.sitMotion=null;rec.doing=null;++rec.goToken;return true;}
+    if(rec.sitting.segment==='sitDown'){rec.sitting.standRequested=true;return true;}
+    if(rec.sitting.segment!=='standUp'){rec.sitting.segment='standUp';rec.sitting.time=0;}
+    return true;
+  }
+  function stepSit(rec,dt) {
+    const s=rec.sitting,m=rec.sitMotion;
+    if(!m)return s.segment!=='approach';
+    if(s.segment==='approach') {
+      if(rec.doing?.verb==='goTo')return false;
+      s.segment='turn';s.time=0;s.turnFrom=rec.heading;rec.doing={verb:'sit'};
+    }
+    s.time+=dt;
+    if(s.segment==='turn') {
+      let d=s.seat.facing-s.turnFrom;d-=Math.round(d/(2*Math.PI))*2*Math.PI;
+      rec.heading=s.turnFrom+d*Math.min(1,s.time/.5);
+      if(s.time<.5)return true;
+      s.segment='sitDown';s.time-=.5;delete s.turnFrom;
+      rec.pos[0]=s.contact[0];rec.pos[2]=s.contact[1];rec.floor=s.floor;setRoom(rec,roomOf(rec.pos,rec.floor));hold(rec);
+    }
+    while(s.time>=m.durations[s.segment]) {
+      s.time-=m.durations[s.segment];
+      if(s.segment==='sitDown')s.segment=s.standRequested?'standUp':'seated';
+      else if(s.segment==='standUp') {
+        const p=m.pose(m.spec.segments.standUp[1]).P[0],h=s.seat.facing;
+        rec.pos[0]+=Math.cos(h)*p[0]+Math.sin(h)*p[2];rec.pos[2]+=-Math.sin(h)*p[0]+Math.cos(h)*p[2];
+        rec.sitting=null;rec.sitMotion=null;rec.doing=null;hold(rec);
+        queue.push({type:'stood',id:rec.id,seat:s.seat.id});
+        if(rec.afterStand){const next=rec.afterStand;rec.afterStand=null;rec.lastClock=clock;goTo(rec.id,next.target,next.opts);}
+        return true;
+      }
+    }
+    return true;
   }
 
   function remove(id) {
@@ -226,6 +306,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   // and a no_way event says so. An empty route means they are already there.
   function goTo(id, target, opts = {}) {
     const rec = people.get(String(id)); if (!rec) return false;
+    if(rec.sitting) {rec.afterStand={target,opts};stand(id);if(rec.sitting)return true;rec.afterStand=null;}
     catchUp(rec);
     const to = posOf(target); if (!to) return false;
     // babies don't walk: carried on a hip or in arms (carry.carrier, a later milestone), so goTo says so instead
@@ -241,7 +322,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
 
   function setRoute(rec, route) {
     const d = rec.doing;
-    if (route == null) { rec.doing = null; queue.push({ type: "no_way", id: rec.id, target: d?.target ?? null }); return false; }
+    if (route == null) { rec.sitting=null;rec.sitMotion=null;rec.doing = null; queue.push({ type: "no_way", id: rec.id, target: d?.target ?? null }); return false; }
     if (!route.length) { rec.doing = null; queue.push({ type: "arrived", id: rec.id, at: { pos: rec.pos.slice(), floor: rec.floor, room: rec.room } }); return true; }
     d.route = route.map(p => p.slice()); d.planning = false; rec.lastClock = clock;
     let len = 0, prev = rec.pos;
@@ -435,6 +516,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     return scale;
   }
   function shuffle(rec, dx, dz) {
+    if(rec.sitting && rec.sitting.segment!=='approach')return;
     const len = Math.hypot(dx, dz);
     if (!len) return;
     const k = Math.min(1, rec.moveLeft / len, clearance(rec, dx, dz));
@@ -479,7 +561,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if (!was) {
       const first = a.id < b.id ? a : b, second = first === a ? b : a;
       // Someone already standing steps aside for traffic; two walkers use the pair's seeds.
-      const winner = !a.doing && b.doing ? b : !b.doing && a.doing ? a : uniform(first.seed, key, String(second.seed)) < 0.5 ? first : second;
+      const winner = a.sitting && a.sitting.segment!=='approach' ? a : b.sitting && b.sitting.segment!=='approach' ? b : !a.doing && b.doing ? b : !b.doing && a.doing ? a : uniform(first.seed, key, String(second.seed)) < 0.5 ? first : second;
       const loser = winner === a ? b : a;
       a.contacts.set(b.id, { until: clock + 4 }); b.contacts.set(a.id, { until: clock + 4 });
       a.aside = b.aside = undefined;                 // choose afresh, not on the staggered fourth frame
@@ -498,7 +580,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const ux = d > 1e-6 ? dx / d : 1, uz = d > 1e-6 ? dz / d : 0;
     // A standing person holds their ground; otherwise split the overlap. Multiple contacts
     // consume the same remaining budget. Separation deliberately holds the gait phase.
-    const am = !!a.doing, bm = !!b.doing, share = am && bm ? 0.5 : 1;
+    const am = !!a.doing && (!a.sitting || a.sitting.segment==='approach'), bm = !!b.doing && (!b.sitting || b.sitting.segment==='approach'), share = am && bm ? 0.5 : 1;
     for (const [o, sign] of [[a, -1], [b, 1]]) {
       if (!o.doing && (am || bm)) continue;
       o.touching = clock + 0.2;
@@ -517,6 +599,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   }
 
   function step(rec, dt, live = false) {
+    if(rec.sitting && stepSit(rec,dt))return;
     const d = rec.doing;
     if (live && rec.recovery?.until > clock) {
       const { x, z } = rec.recovery;
@@ -741,6 +824,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const d = rec.doing;
     return {
       at: { pos: rec.pos.slice(), floor: rec.floor, room: rec.room }, heading: rec.heading, phase: rec.phase,
+      ...(rec.sitting ? {sitting:structuredClone(rec.sitting), ...(rec.afterStand?{afterStand:structuredClone(rec.afterStand)}:{})} : {}),
       ...(rec.paceState ? {paceState:{...rec.paceState}} : {}),
       doing: d ? { verb: d.verb, target: d.target, opts: d.opts } : null, holding: rec.holding, presence: rec.presence,
     };
@@ -763,7 +847,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       arrivals.length = planners.length = nb.length = nbAll.length = nbAllD2.length = 0;
       listed = shown = null; queue = [];
     },
-    add, remove, goTo, face, tick, hit, state,
+    add, remove, goTo, face, sit, stand, tick, hit, state,
     dump() {
       for (const rec of people.values()) catchUp(rec);
       return dumpPeople(people.values());

@@ -382,7 +382,7 @@ export function skirtPose(spec, bones, ctx = {}, out = new Float32Array(RINGS * 
     const cx = ringC[3 * k], cy = ringC[3 * k + 1], cz = ringC[3 * k + 2], nx = ringN[3 * k], ny = ringN[3 * k + 1], nz = ringN[3 * k + 2], fx = ringF[3 * k], fy = ringF[3 * k + 1], fz = ringF[3 * k + 2];
     const lx = fy * nz - fz * ny, ly = fz * nx - fx * nz, lz = fx * ny - fy * nx, base = k * AROUND;
     for (let j = 0; j < AROUND; j++) {
-      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND]));
+      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND])) + (seat>0 && ctx.seatEdge!==undefined && spec.short ? .035*spec.H : 0);
       const o = (base + j) * 3, ux = sn * lx + cs * fx, uy = sn * ly + cs * fy, uz = sn * lz + cs * fz;
       out[o] = cx + r * ux; out[o + 1] = cy + r * uy; out[o + 2] = cz + r * uz;
       UD[o] = ux; UD[o + 1] = uy; UD[o + 2] = uz;
@@ -408,7 +408,12 @@ export function skirtPose(spec, bones, ctx = {}, out = new Float32Array(RINGS * 
   // ---- the seat: with one, the lap lies on it and the rest falls from its front edge. The seat's front edge is the line behind the calf (spec: behind); a vertex of the
   // lap's rings (to the knee) that lies behind it and below the seat's top is lifted onto it; a vertex of the rings below the knee that lies behind it is carried
   // forward onto the edge's vertical plane, so the skirt hangs from the seat's edge to the floor and never goes under the seat.
-  if (seat > 0) {
+  if (seat > 0 && ctx.seatEdge !== undefined) {
+    for(let k=0;k<RINGS;k++)for(let j=0;j<AROUND;j++) {
+      const o=(k*AROUND+j)*3,p=seatKeepout([out[o],out[o+1],out[o+2]],k,spec,seat,ctx.seatEdge);
+      out.set(p,o);
+    }
+  } else if (seat > 0) {
     const top = seat + 0.004;
     const lapRings = spec.short ? RINGS : R_KNEE + 1;           // a tube of the breeches lies on the seat all its length (it is on the thigh to the knee band)
     for (let i = 0; i < lapRings * AROUND; i++) if (out[3 * i + 1] < top) { out[3 * i + 1] = top; LIFT[i] = 1; } else LIFT[i] = 0;           // the lap lies on the seat from the hips to the knee
@@ -555,4 +560,12 @@ export function skirtOutside(solid, sk, x, y, z) {
     dPrev = d;
   }
   return best;
+}
+
+// Reference for the GPU's finite front-edge keep-out. Rings through the knee
+// rest on the top; the lower hem hangs in front of the board.
+export function seatKeepout(p,ring,spec,seat,edge) {
+  if(!(seat>0))return p;
+  const lap=ring<=9||spec.short>.5,top=seat+.004;
+  return [p[0],lap&&p[2]<=edge?Math.max(p[1],top):p[1],!lap&&p[1]<top+.03?Math.max(p[2],edge+.004):p[2]];
 }
