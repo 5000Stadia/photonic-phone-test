@@ -125,11 +125,11 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.basis       the fitted gait basis (spikes/gait/data/gait-basis.json, loaded)
  * @param opts.thresholds  { near, mid } in metres at middle rank
  * @param opts.walk        "mocap" (default) or "fitted" for the previous harmonic walker
- * @param opts.samePace    diagnostic: retain the pace bank at each body's Neutral capture speed
+ * @param opts.samePace    true (the default, Kabe 2026-10-15: the capture's own speed looks best): everyone at their body's Neutral capture speed; false: per-person pace
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = false, outfits = outfitFor } = {}) {
+export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = true, outfits = outfitFor } = {}) {
   const env = { outfits, basis, walk, samePace };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids

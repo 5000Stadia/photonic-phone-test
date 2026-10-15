@@ -72,7 +72,7 @@ const store = {
 };
 const WARM = [4, 5];                                       // the variants measured again at 300 once the phone is warm
 const QUICK = FLAGS.includes("quick") ? ["quick"] : [];     // tests only: a "minute" of 3 s
-const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], ...(VARIANTS[v][1].includes("wgpu") ? [] : ["gl"]), ...VARIANTS[v][1], ...QUICK, ...(FLAGS.includes("samepace") ? ["samepace"] : []), ...(FLAGS.includes("mainoverflow") ? ["mainoverflow"] : []), `suite${v}.${st}`].join("-"); location.reload(); };
+const suiteGo = (v, st) => { location.hash = ["c2c", VARIANTS[v][2][st], ...(VARIANTS[v][1].includes("wgpu") ? [] : ["gl"]), ...VARIANTS[v][1], ...QUICK, ...(FLAGS.includes("ownpace") ? ["ownpace"] : []), ...(FLAGS.includes("mainoverflow") ? ["mainoverflow"] : []), `suite${v}.${st}`].join("-"); location.reload(); };
 const sustainGo = () => { location.hash = ["c2c-300-gl-own-near-room", ...QUICK, "suiteS"].join("-"); location.reload(); };
 const warmGo = (k) => { location.hash = ["c2c", 300, "gl", ...VARIANTS[WARM[k]][1], ...QUICK, `suiteW${k}`].join("-"); location.reload(); };
 const startAll = () => { store.save({ rows: [], sustain: null, warm: [], started: Date.now(), fixed: true }); suiteGo(0, 0); };
@@ -168,14 +168,14 @@ async function plazaRun() {
   camera.position.set(...PLAZA_VIEW[0]); camera.lookAt(...PLAZA_VIEW[1]); camera.updateMatrixWorld();
   addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
   const idle = () => new Promise((res) => { const q = renderer.backend.device?.queue; if (q) q.onSubmittedWorkDone().then(res); else { syncGpu(); res(); } });
-  const label = `real plaza${FLAGS.includes("samepace") ? ", same pace" : ""}, ${dressed ? "dressed" : "undressed"}, ${backend === "webgpu" ? "WebGPU" : "WebGL2"}`;
+  const label = `real plaza${FLAGS.includes("ownpace") ? ", own pace" : ""}, ${dressed ? "dressed" : "undressed"}, ${backend === "webgpu" ? "WebGPU" : "WebGL2"}`;
   say(`${label}: building 300 people…\n${caps}`);
   await new Promise(r => setTimeout(r, 50));                         // let the message paint before the main thread is busy
   const tSight = performance.now();
   // the pipelines compile ahead, in the loading phase (people.warm, then compileAsync beside people.compile, which also builds the
   // skirt passes; nothing deferred, so no hitch after loading) and one warm render; "loading" is all of that, and first sight is
   // the first frame after it, the one a player sees
-  const compile = async (g, people) => { people.setSamePace(FLAGS.includes("samepace")); people.setOverflow(FLAGS.includes("mainoverflow") ? "main" : "demote"); await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); };
+  const compile = async (g, people) => { people.setSamePace(!FLAGS.includes("ownpace")); people.setOverflow(FLAGS.includes("mainoverflow") ? "main" : "demote"); await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera, { defer: false })]); scene.add(g); };
   const plaza = makePlaza(THREE, { basis, compile, ...(dressed ? {} : { outfits: false }) });
   await plaza.ready;
   let counts = plaza.tick(1 / 60, 1 / 60, camera);

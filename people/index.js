@@ -20,7 +20,7 @@ export const PEOPLE_API = "photonic.people/1";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = false } = {}) {
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true } = {}) {
   let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, ...(outfits !== undefined ? { outfits } : {}) });
   let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
