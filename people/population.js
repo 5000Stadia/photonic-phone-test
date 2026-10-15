@@ -29,7 +29,8 @@ class Person {
     this.height = f.height; this.lastClock = f.lastClock; this.goToken = 0; this.half = Math.max(0.18, 0.13 * f.height);
     this.env = env; this.gone = false;
     // what the walking keeps (population.js) and the drawing keeps (draw.js), all here so the shape never changes
-    this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined; this.bumped = undefined;
+    this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined;
+    this.contacts = new Map(); this.recovery = null; this.moveLeft = 0; this.tickX = 0; this.tickZ = 0;
     this.offRoute = undefined; this.lastGood = undefined; this.replan = undefined;
     this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this._cstockings = undefined; this._cbare = undefined; this.nearGarment = undefined; this.specRow = undefined;
     this.hair = hairFor(this.values, this.seed, this.res.derived, Object.fromEntries((typeof this.res.recipe.said === "string" ? parse(this.res.recipe.said).constraints : this.res.recipe.said.constraints ?? []).map(c => [c.trait,true])));
@@ -244,6 +245,7 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   // Decided every 4th frame per person (staggered by rank), kept in between.
   // Returns { turn, pace } (pace: the share of their own speed), or null to stand this frame.
   const TURNS = [0, 0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.35, -1.35];
+  const CONTACT_TURNS = [...TURNS, 1.8, -1.8, 2.4, -2.4];
   const AV = { reach: 3, nearest: 8, horizon: 2.5, margin: 0.06, cell: 2 };
   let frameNo = 0;
   // the grid is kept between frames and emptied each one, so a frame allocates nothing for it: `grid` maps a cell to its people, `cells` lists this frame's occupied cells in the order
@@ -318,44 +320,75 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
   function choose(rec, dx, dz, v, stepLen) {
     neighbours(rec);
     const claims = ctx.claims?.bodyAt;
-    if (!nbN && !claims) return STRAIGHT;
+    if (!nbN && !claims && !ctx.walk?.stand) return STRAIGHT;
     const la = Math.max(0.45, v * 0.45), base = Math.atan2(dx, dz), bs = Math.sin(base), bc = Math.cos(base);
     // the way ahead clear of everyone for the horizon (most of the time, in most places): straight on, nothing more to weigh
     // (straying from the wanted velocity is nothing here, so the cost is the penalty alone)
-    if (penalty(tminOf(rec, bs * v, bc * v)) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return STRAIGHT;
+    if (standAt(rec, rec.pos[0] + bs * la, rec.pos[2] + bc * la) != null && clearance(rec, bs * la, bc * la) === 1 && penalty(tminOf(rec, bs * v, bc * v)) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return STRAIGHT;
     let have = false, bestTurn = 0, bestPace = 0, bestCost = 0;
+    // A squeeze still respects remembered bodies, but accepts a closer approach to others.
+    // Wider turns and a consistent side let a bumped walker escape instead of stopping forever.
+    const anticipation = rec.progress?.squeeze > clock ? 0.15 : 1;
+    const turns = rec.contacts.size ? CONTACT_TURNS : TURNS;
     for (let si = 0; si < 2; si++) {
       const s = SPEEDS[si];
-      for (let ai = 0; ai < TURNS.length; ai++) {
-        const a = TURNS[ai], sh = Math.sin(base + a), ch = Math.cos(base + a);
+      for (let ai = 0; ai < turns.length; ai++) {
+        const a = turns[ai], sh = Math.sin(base + a), ch = Math.cos(base + a);
         // straying: the distance between this velocity and the wanted one, in shares of their speed (0 to 2). The cost is at least that, so a candidate straying further than the best
         // so far cannot win and its neighbours are not weighed (the square root bounds the true length from below within 1e-12)
         const ex = sh * s - bs, ez = ch * s - bc;
         if (have && Math.sqrt(ex * ex + ez * ez) * (1 - 1e-12) >= bestCost) continue;
-        const stray = Math.hypot(ex, ez), cost = stray + penalty(tminOf(rec, sh * v * s, ch * v * s));
+        const sideCost = rec.contacts.size && rec.recovery && a * (rec.recovery.x * bc - rec.recovery.z * bs) < 0 ? 0.8 : 0;
+        const stray = Math.hypot(ex, ez), cost = stray + sideCost + 4 * (1 - clearance(rec, sh * la * s, ch * la * s)) + anticipation * penalty(tminOf(rec, sh * v * s, ch * v * s));
         if (have && cost >= bestCost) continue;
         const x = rec.pos[0] + sh * la * s, z = rec.pos[2] + ch * la * s;
         if (claims && blocked(rec, claims, sh * la * s, ch * la * s)) continue;
-        if (a !== 0) {
-          if (standAt(rec, x, z) == null) continue;                             // no ground there for this body
-          if (standAt(rec, rec.pos[0] + sh * stepLen * s, rec.pos[2] + ch * stepLen * s) == null) continue;
-        }
+        if (standAt(rec, x, z) == null) continue;                             // no ground there for this body
+        if (standAt(rec, rec.pos[0] + sh * stepLen * s, rec.pos[2] + ch * stepLen * s) == null) continue;
         have = true; bestTurn = a; bestPace = s; bestCost = cost;
       }
     }
-    const still = Math.hypot(bs, bc) + penalty(tminOf(rec, 0, 0));
+    const still = (rec.contacts.size ? 4 : Math.hypot(bs, bc)) + penalty(tminOf(rec, 0, 0));
     if (!have || still < bestCost) return null;
     return { turn: bestTurn, pace: bestPace, cost: bestCost };
   }
 
-  // Bumping: when two bodies overlap anyway (a crowd too dense to avoid everyone, someone stepping out of a door),
-  // they are nudged apart, each by half the overlap at up to 1.2 m/s (a walker meeting someone standing takes it all), onto ground they can stand on, and both slow
-  // for half a second. A `bumped` event goes out once per contact, as it starts (M4's reactions: "pardon").
+  // Contacts share the walking budget: separation is a shuffle, never an extra burst of speed.
+  // A seeded right of way commits one walker to a short sidestep. Both remember the pair for
+  // four seconds and cannot close through its clearance, even when squeezing or near a goal.
+  function clearance(rec, dx, dz) {
+    let scale = 1;
+    for (const [id, c] of rec.contacts) {
+      const o = people.get(id);
+      if (!o || o.presence === "offscene" || o.floor !== rec.floor || c.until <= clock) { rec.contacts.delete(id); continue; }
+      const px = o.pos[0] - rec.pos[0], pz = o.pos[2] - rec.pos[2], dist = Math.hypot(px, pz);
+      const closing = dx * px + dz * pz;
+      // The tangent half-plane is conservative and cannot tunnel through the other body.
+      if (closing > 0) scale = Math.min(scale, Math.max(0, dist - rec.half - o.half - 0.001) * dist / closing);
+    }
+    return scale;
+  }
+  function shuffle(rec, dx, dz) {
+    const len = Math.hypot(dx, dz);
+    if (!len) return;
+    const k = Math.min(1, rec.moveLeft / len, clearance(rec, dx, dz));
+    const x = rec.pos[0] + dx * k, z = rec.pos[2] + dz * k, y = standAt(rec, x, z);
+    if (y == null) return;
+    rec.pos[0] = x; rec.pos[1] = y; rec.pos[2] = z;
+    rec.moveLeft = Math.max(0, rec.moveLeft - len * k);
+    rec.offRoute = true;
+    hold(rec);
+  }
   const TURN_RATE = 6;                 // radians a second
   let touching = new Set();
   const STENCIL = [[0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];     // each pair of neighbouring cells once
   function bumps(dt) {
     const now = new Set();
+    // Cell membership was built before walking; keep ongoing contacts even across a cell edge.
+    for (const key of touching) {
+      const [ai, bi] = JSON.parse(key), a = people.get(ai), b = people.get(bi);
+      if (a && b && a.floor === b.floor && Math.hypot(a.pos[0] - b.pos[0], a.pos[2] - b.pos[2]) < a.half + b.half + 0.08) now.add(key);
+    }
     for (let c = 0; c < cells.length; c++) {
       const cell = cells[c], a0 = cell[0], ci = Math.floor(a0.pos[0] / AV.cell), cj = Math.floor(a0.pos[2] / AV.cell);
       for (let q = 0; q < STENCIL.length; q++) {
@@ -371,36 +404,53 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     if (a.floor !== b.floor) return;
     const dx = b.pos[0] - a.pos[0], dz = b.pos[2] - a.pos[2], r = a.half + b.half;
     if (dx * dx + dz * dz >= (r + 0.08) * (r + 0.08)) return;
-    const d = Math.hypot(dx, dz), key = a.id < b.id ? a.id + "|" + b.id : b.id + "|" + a.id, was = touching.has(key);
+    const d = Math.hypot(dx, dz), key = JSON.stringify(a.id < b.id ? [a.id, b.id] : [b.id, a.id]), was = touching.has(key);
     if (d >= r + (was ? 0.08 : 0)) return;                                    // a contact lasts until they're clear of it
     now.add(key);
     if (!was) {
-      a.bumped = b.bumped = clock + 0.5;
+      const first = a.id < b.id ? a : b, second = first === a ? b : a;
+      // Someone already standing steps aside for traffic; two walkers use the pair's seeds.
+      const winner = !a.doing && b.doing ? b : !b.doing && a.doing ? a : uniform(first.seed, key, String(second.seed)) < 0.5 ? first : second;
+      const loser = winner === a ? b : a;
+      a.contacts.set(b.id, { until: clock + 4 }); b.contacts.set(a.id, { until: clock + 4 });
+      a.aside = b.aside = undefined;                 // choose afresh, not on the staggered fourth frame
+      a.waited = b.waited = 0;
+      // Step to the side of the winner's route already nearest us; keep that side throughout.
+      const wp = winner.doing?.route?.[winner.doing.leg];
+      const h = wp ? Math.atan2(wp[0] - winner.pos[0], wp[2] - winner.pos[2]) : winner.heading;
+      const sx = Math.cos(h), sz = -Math.sin(h);
+      const side = (loser.pos[0] - winner.pos[0]) * sx + (loser.pos[2] - winner.pos[2]) * sz >= 0 ? 1 : -1;
+      const awayX = loser.pos[0] - winner.pos[0], awayZ = loser.pos[2] - winner.pos[2], awayLen = Math.hypot(awayX, awayZ) || 1;
+      const rx = sx * side + awayX / awayLen, rz = sz * side + awayZ / awayLen, rl = Math.hypot(rx, rz);
+      loser.recovery = { until: clock + 0.8, x: rx / rl, z: rz / rl };
       queue.push({ type: "bumped", id: a.id, by: b.id }, { type: "bumped", id: b.id, by: a.id });
     }
     if (d >= r) return;
     const ux = d > 1e-6 ? dx / d : 1, uz = d > 1e-6 ? dz / d : 0;
-    // someone standing still holds their ground: the walker takes the whole nudge
-    const am = !!a.doing, bm = !!b.doing, share = am && bm ? 0.5 : 1, push = Math.min((r - d) * share, 1.2 * dt);
-    // meeting head-on, each also gives way to their own right, so the two slip past rather than push in a line
-    const headOn = Math.sin(a.heading) * Math.sin(b.heading) + Math.cos(a.heading) * Math.cos(b.heading) < -0.3;
-    for (const [o, k] of [[a, -push], [b, push]]) {
+    // A standing person holds their ground; otherwise split the overlap. Multiple contacts
+    // consume the same remaining budget. Separation deliberately holds the gait phase.
+    const am = !!a.doing, bm = !!b.doing, share = am && bm ? 0.5 : 1;
+    for (const [o, sign] of [[a, -1], [b, 1]]) {
       if (!o.doing && (am || bm)) continue;
       o.touching = clock + 0.2;
-      const side = headOn && o.doing ? 0.5 * Math.abs(k) : 0;
-      const x = o.pos[0] + ux * k - Math.cos(o.heading) * side, z = o.pos[2] + uz * k + Math.sin(o.heading) * side, y = standAt(o, x, z);
-      if (y == null) continue;
-      o.pos[0] = x; o.pos[1] = y; o.pos[2] = z; hold(o);
+      const push = Math.min((r - d + 0.01) * share, o.speed * dt);
+      shuffle(o, ux * sign * push, uz * sign * push);
     }
   }
 
   // Walking: along the route at the person's own speed; the phase advances only while walking, at their own cadence.
   function step(rec, dt, live = false) {
     const d = rec.doing;
+    if (live && rec.recovery?.until > clock) {
+      const { x, z } = rec.recovery;
+      rec.heading = Math.atan2(x, z);
+      shuffle(rec, x * rec.moveLeft, z * rec.moveLeft);
+      return;
+    }
     if (!d || d.verb !== "goTo" || d.planning) return;
     if (d.opts?.inPlace) { rec.phase = (rec.phase + rec.rate * (d.opts.pace ?? 1) * dt) % 1; return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
-    const pace = d.opts?.pace ?? 1, v = rec.speed * pace;
-    let left = v * dt;
+    const pace = Math.min(1, d.opts?.pace ?? 1), v = rec.speed * pace;
+    let left = live ? Math.min(v * dt, rec.moveLeft) : v * dt;
     let startLeft = left;
     const last = d.leg === d.route.length - 1;
     const rest = d.leg < d.route.length ? Math.hypot(d.route[d.leg][0] - rec.pos[0], d.route[d.leg][2] - rec.pos[2]) : 0;
@@ -420,10 +470,9 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     // a corner of the route someone else is standing on, while touching them: close enough, on to the next waypoint
     // (the straight line from here is checked for ground, as after a sidestep)
     if (live && rec.touching > clock && d.leg < d.route.length - 1 && rest < rec.half + 0.35) { d.leg++; rec.offRoute = true; }
-    if (live && rec.bumped > clock) startLeft = left *= 0.6;                  // a bump: a moment's slowing
-    if (!squeezing && live && avoid && d.leg < d.route.length && !(last && rest < 1.2)) {
+    if ((!squeezing || rec.contacts.size) && live && avoid && d.leg < d.route.length && (!(last && rest < 1.2) || rec.contacts.size)) {
       const p = d.route[d.leg], dx = p[0] - rec.pos[0], dz = p[2] - rec.pos[2];
-      const fresh = rec.aside === undefined || (frameNo + Math.floor(rec.rank * 4)) % 4 === 0;
+      const fresh = rec.contacts.size > 0 || rec.aside === undefined || (frameNo + Math.floor(rec.rank * 4)) % 4 === 0;
       const dec = fresh ? choose(rec, dx, dz, v, left) : rec.aside;
       rec.aside = dec;
       if (dec === null) {                                                     // blocked: stand, feet still
@@ -436,7 +485,9 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       left *= dec.pace;
       startLeft = left;
       if (dec.turn !== 0) {                                                   // a sidestep this frame, on standable ground
-        const h = Math.atan2(dx, dz) + dec.turn, x = rec.pos[0] + Math.sin(h) * left, z = rec.pos[2] + Math.cos(h) * left;
+        const h = Math.atan2(dx, dz) + dec.turn;
+        left *= clearance(rec, Math.sin(h) * left, Math.cos(h) * left);
+        const x = rec.pos[0] + Math.sin(h) * left, z = rec.pos[2] + Math.cos(h) * left;
         const y = standAt(rec, x, z);
         if (y == null) { rec.aside = undefined; return; }                    // the kept decision ran out of floor
         rec.heading = h; rec.pos[0] = x; rec.pos[1] = y; rec.pos[2] = z;
@@ -457,6 +508,16 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
     while (left > 0 && d.leg < d.route.length) {
       const p = d.route[d.leg], dx = p[0] - rec.pos[0], dz = p[2] - rec.pos[2], dist = Math.hypot(dx, dz);
       if (dist > 1e-6) rec.heading = Math.atan2(dx, dz);
+      const travel = Math.min(left, dist), k = live && dist > 0 ? clearance(rec, dx / dist * travel, dz / dist * travel) : 1;
+      if (k < 1) {
+        const moved = travel * k;
+        if (p[1] != null) rec.pos[1] += (p[1] - rec.pos[1]) * moved / dist;
+        rec.pos[0] += dx / dist * moved; rec.pos[2] += dz / dist * moved;
+        left -= moved; rec.aside = undefined;
+        break;                              // keep the waypoint until we actually reach it
+      }
+      const fraction = dist > 0 ? Math.min(left, dist) / dist : 0;
+      if (live && standAt(rec, rec.pos[0] + dx * fraction, rec.pos[2] + dz * fraction) == null) { rec.aside = undefined; break; }
       if (dist <= left) { rec.pos[0] = p[0]; rec.pos[1] = p[1] ?? rec.pos[1]; rec.pos[2] = p[2]; left -= dist; d.leg++; rec.offRoute = false; rec.lastGood = rec.pos.slice(); }
       else {
         // height follows the segment (stairs, slopes): a straight line from here to the waypoint's height
@@ -522,6 +583,7 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       const rec = list[i];
       if (rec.presence === "offscene") continue;
       rec.vel ??= [0, 0];
+      rec.moveLeft = rec.speed * dt; rec.tickX = rec.pos[0]; rec.tickZ = rec.pos[2];
       const key = cellOf(rec.floor, rec.pos[0], rec.pos[2]);
       let cell = grid.get(key);
       if (cell === undefined) grid.set(key, cell = []);
@@ -535,7 +597,9 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       if (rec.lastClock < clock - dt - 1e-9) catchUp(rec);                     // back from hidden: catch up at once
       if (rec.lastClock < clock) {
         const x0 = rec.pos[0], z0 = rec.pos[2], h0 = rec.heading, span = clock - rec.lastClock;
+        const budget = rec.moveLeft;
         step(rec, span, true); rec.lastClock = clock;
+        rec.moveLeft = Math.max(0, budget - Math.hypot(rec.pos[0] - x0, rec.pos[2] - z0));
         rec.vel[0] = (rec.pos[0] - x0) / span; rec.vel[1] = (rec.pos[2] - z0) / span;
         // the body turns at most TURN_RATE: a sidestep's new heading is eased into, never snapped
         let dh = rec.heading - h0; dh -= 2 * Math.PI * Math.round(dh / (2 * Math.PI));
@@ -558,7 +622,12 @@ export function makePopulation({ ctx = {}, basis, thresholds = DEFAULT_THRESHOLD
       rec.tier = tierFor(rec, d);
       out[rec.tier].push(rec);
     }
-    if (avoid && dt > 0) bumps(dt);
+    if (avoid && dt > 0) {
+      bumps(dt);
+      for (const rec of list) if (!rec.gone && rec.presence !== "offscene") {
+        rec.vel[0] = (rec.pos[0] - rec.tickX) / dt; rec.vel[1] = (rec.pos[2] - rec.tickZ) / dt;
+      }
+    }
     return out;
   }
 

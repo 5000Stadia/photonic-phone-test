@@ -10,7 +10,7 @@
 // Anything that can say that is a volume: a sphere, a capsule, a skirt's rings (garments/skirt.js skirtVolume), later a seat, a table, a carried tray.
 //
 // Runs on the bones { W (B x 9 world rotations, row-major), P (B x 3 joint positions) } of a pose, in place: baked into a person's walk once (walk.js bakes the 32 frames; the
-// crowd pays nothing a frame), live for the near tier and for offline poses. + - * / and sqrt only (no trigonometry), so every engine bakes the same bits.
+// crowd pays nothing a frame), live for the near tier and for offline poses. The walking shoulder search uses trigonometry only at pose/bake time.
 import { BONES } from "../body.js";
 
 const BI = Object.fromEntries(BONES.map(([n], i) => [n, i]));
@@ -33,13 +33,16 @@ export const capsuleVolume = (a, b, ra, rb = ra) => ({
 // direction from the bone's joint, `lat` sideways (negative toward the body: the hand is a plate lying inward of the wrist's axis, a 0.35 l2 wide), `dep` forward (the thumb's
 // side), and a radius `r` (also in l2). From the hand's own vertices on an adult, a girl, a toddler and an old woman: along 0 to 0.74, lat -0.31 to 0.04, dep -0.23 to 0.33,
 // the same in every body.
+// Taper the elbow/forearm envelope toward the wrist; the former nearly uniform
+// 0.22..0.19 radii held thin arms centimetres away. Validated against actual
+// skinned arm vertices over the 44-person sweep, including heavy builds.
 export const ARM_PROBES = [
-  { name: "upper arm 1", bone: 2, along: 0.55, lat: 0, dep: 0, r: 0.22 },          // (bone 2: the upper arm's own, along its length l1; the shoulder is the pivot and stays)
-  { name: "upper arm 2", bone: 2, along: 0.85, lat: 0, dep: 0, r: 0.2 },
-  { name: "elbow", bone: 0, along: 0, lat: 0, dep: 0, r: 0.22 },
-  { name: "forearm 1", bone: 0, along: 0.3, lat: 0, dep: 0, r: 0.21 },
-  { name: "forearm 2", bone: 0, along: 0.6, lat: 0, dep: 0, r: 0.20 },
-  { name: "forearm 3", bone: 0, along: 0.9, lat: 0, dep: 0, r: 0.19 },
+  { name: "upper arm 1", bone: 2, along: 0.55, lat: 0, dep: 0, r: 0.18 },          // (bone 2: the upper arm's own, along its length l1; the shoulder is the pivot and stays)
+  { name: "upper arm 2", bone: 2, along: 0.85, lat: 0, dep: 0, r: 0.15 },
+  { name: "elbow", bone: 0, along: 0, lat: 0, dep: 0, r: 0.165 },
+  { name: "forearm 1", bone: 0, along: 0.3, lat: 0, dep: 0, r: 0.18 },
+  { name: "forearm 2", bone: 0, along: 0.6, lat: 0, dep: 0, r: 0.165 },
+  { name: "forearm 3", bone: 0, along: 0.9, lat: 0, dep: 0, r: 0.12 },
   // the hand: nine spheres from a farthest-point clustering of an adult's hand vertices (the cloud is the same in every body, in units of l2), each as large as its cluster
   { name: "hand 1", bone: 1, along: 0.07, lat: -0.05, dep: 0.07, r: 0.15 },
   { name: "hand 2", bone: 1, along: 0.17, lat: -0.05, dep: -0.08, r: 0.17 },
@@ -131,6 +134,38 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
         const { up, fo, ha } = sd;
         // the pose as it came
         for (const [i, b] of [up, fo, ha].entries()) { for (let k = 0; k < 9; k++) W0[9 * i + k] = W[9 * b + k]; for (let k = 0; k < 3; k++) P0[3 * i + k] = P[3 * b + k]; }
+        // During walking, first find the smallest shoulder opening that clears
+        // the probes. Preserve the fitted elbow and swing instead of letting
+        // repeated wrist pushes straighten and over-open the arm. Offline IK
+        // still allows a hand to settle on a lap or reach around an object.
+        if (ctx.sway === 1) {
+          const savedW = W0.slice(), savedP = P0.slice(), chest = BI.chest * 9;
+          const sign = up === BI.upperarmL ? 1 : -1;
+          const ax = W[chest + 2] * sign, ay = W[chest + 5] * sign, az = W[chest + 8] * sign;
+          const turnArm = angle => {
+            const c = Math.cos(angle), sn = Math.sin(angle), t = 1 - c;
+            const R = [t*ax*ax+c,t*ax*ay-sn*az,t*ax*az+sn*ay,
+              t*ax*ay+sn*az,t*ay*ay+c,t*ay*az-sn*ax,
+              t*ax*az-sn*ay,t*ay*az+sn*ax,t*az*az+c];
+            for (let i = 0; i < 3; i++) {
+              m3(W0.subarray(i*9,i*9+9), R, savedW.subarray(i*9,i*9+9));
+              vm(R,savedP[i*3]-savedP[0],savedP[i*3+1]-savedP[1],savedP[i*3+2]-savedP[2],tmp3);
+              for (let k = 0; k < 3; k++) P0[i*3+k] = savedP[k] + tmp3[k];
+            }
+          };
+          const clearArm = () => sd.probes.every(pr => probe(sd,pr,T) <= 1e-7);
+          let lo = 0, hi = 0;
+          while (!clearArm() && hi < Math.PI / 3) { lo = hi; hi += Math.PI / 180; turnArm(hi); }
+          if (clearArm()) {
+            if (hi) {
+              for (let k = 0; k < 10; k++) { const mid = (lo+hi)/2; turnArm(mid); if (clearArm()) hi=mid; else lo=mid; }
+              turnArm(hi);
+              for (const [i,b] of [up,fo,ha].entries()) { W.set(W0.subarray(i*9,i*9+9),b*9); P.set(P0.subarray(i*3,i*3+3),b*3); }
+            }
+            continue;
+          }
+          W0.set(savedW); P0.set(savedP);
+        }
         const E0x = P0[3], E0y = P0[4], E0z = P0[5], T0x = P0[6], T0y = P0[7], T0z = P0[8];
         originalBend(sd, W, P);                     // the side her elbow is on, and how far: U0, RHO0
         // the wrist target and the elbow's hint, found from the original pose and moved by what the probes ask, the arm re-posed by IK each round (rounds, not a solve: the
@@ -151,7 +186,7 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
             if (pr.bone === 1) { if (m > mh) { mh = m; GH[0] = T[0]; GH[1] = T[1]; GH[2] = T[2]; } }
             else if (m / share > mf / sf) { mf = m; sf = share; GF[0] = T[0]; GF[1] = T[1]; GF[2] = T[2]; }
           }
-          if (mh) { tx += GH[0] * mh; ty += GH[1] * mh; tz += GH[2] * mh; }                // the hand's probes move the wrist
+          if (mh) { tx += GH[0] * mh; ty += GH[1] * mh; tz += GH[2] * mh; }
           if (mf) { hx += GF[0] * mf; hy += GF[1] * mf; hz += GF[2] * mf; const g = Math.min(1 / sf, 1.6); tx += GF[0] * mf * g; ty += GF[1] * mf * g; tz += GF[2] * mf * g; }
           moved = moved || any;
           if (!any) break;

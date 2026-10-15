@@ -45,6 +45,9 @@ function angles(w, p) {
     A[6] -= P.neck0;
     A[9] = A[9] * P.L / 100; A[10] = A[10] * P.L / 100; A[11] = A[11] * P.L / 100;
   }
+  // The gait angles are measured from vertical, whereas the rig's rest arms
+  // already lean out. Remove that rest spread before applying the gait.
+  for (let side = 0; side < 2; side++) A[17 + 7 * side] -= w.armRest[side];
   // an outfit's arm rest (R5, outfits declare it): degrees added to both shoulders' flexion (forward) and abduction (out from the side), so a wearer's arms hang
   // over a skirt's swell instead of inside it. Others have none (w.arms is null) and walk as the data has them.
   if (w.arms) for (let s = 0; s < 2; s++) { A[16 + 7 * s] += w.arms.flex; A[17 + 7 * s] += w.arms.abd; }
@@ -122,6 +125,15 @@ export function makeWalker(J, who, basis) {
   // root "fitted": the data's own pelvis path, 2 ms a person, against 16 ms for the root from the feet (65 against 42 mm
   // of slide a step). The crowd page bakes on the main thread; the engine moves the full root into a worker (R7).
   const P = params({ age: who.age, sex: who.sex, height: H, seed: who.seed, root: who.root ?? "fitted" }, basis);
+  // Retarget the capture's shoulder neutral offsets to a relaxed hang.
+  // Keep its harmonics, sex/age axes and personal residuals; clearance is solved
+  // against this wearer's clothes afterwards, never a population-wide arm spread.
+  P.off.shoulder_abd = (P.off.shoulder_abd || 0) + 8 - basis.axes[0][basis.layout.shoulder_abd[0]];
+  P.off.shoulder_flex = (P.off.shoulder_flex || 0) - basis.axes[0][basis.layout.shoulder_flex[0]];
+  // Children beyond the high-guard toddler stage have a looser swing. The fitted
+  // age axes already reduce the elders' excursion; leave that variation intact.
+  if (who.age >= 3.5 && who.age < 12) P.scl.shoulder_flex = (P.scl.shoulder_flex ?? 1) * (1 + 0.2 * (12 - who.age) / 8.5);
+  P.plan = null; // params() may have cached a plan while calibrating the legs.
   // timing from this body's own leg (dynamic similarity), so the feet don't slide on it
   const L = hipY, v = Math.sqrt(P.fr * 9.81 * L), stride = P.lam * L, f = v / stride;
   const scaleTrans = L / P.L;
@@ -130,6 +142,10 @@ export function makeWalker(J, who, basis) {
     Dj: BONES.map(([, pa], b) => (pa < 0 ? null : [J[b][0] - J[pa][0], J[b][1] - J[pa][1], J[b][2] - J[pa][2]])), src: null };
   // which scratch rotation each bone takes; the head bone shares the neck's, the hand the forearm's, the toe the foot's
   const sideOf = (n) => Rside[n.endsWith("L") ? 0 : 1];
+  w.armRest = ["L", "R"].map(s => {
+    const a = J[BI["upperarm" + s]], b = J[BI["forearm" + s]];
+    return Math.atan2(Math.abs(b[0] - a[0]), a[1] - b[1]) / D;
+  });
   w.bones = { W: w.Wm, P: w.Pm };
   w.src = BONES.map(([n]) => n === "hips" ? Rpel : n === "spine" ? Rsp : n === "chest" ? Rch : n === "neck" || n === "head" ? Rnk : n.startsWith("clav") ? Rch
     : n.startsWith("upperarm") ? sideOf(n).ua : n.startsWith("forearm") || n.startsWith("hand") ? sideOf(n).fa : n.startsWith("thigh") ? sideOf(n).th
