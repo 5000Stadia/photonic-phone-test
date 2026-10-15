@@ -1,3 +1,4 @@
+import { walkSample } from '../walk-sample.js';
 // The pose-following skirt on the GPU (R5; garments/skirt.js is its plain-JS reference, which this follows step by step). Stateless in the pose: every frame the skirt of
 // every dressed person drawn is a function of their bones (the shared walk texture), the gait phase and their skirt spec. Three stages, batched over everyone (never a pass or a
 // draw a person):
@@ -17,7 +18,7 @@
 //                                     texel 33's (z, w) tag the block: the agent texture's row of the person it belongs to and which tube (leg) it is, so a pass reads its person from its own spec row and
 //                                     one system serves every outfit of a tier (a person taking one block or two; the draw's classes lay their people one after another in the one agent texture)
 // Per-instance data, read from the agent texture (row = instance): texel 0 [x, z, heading, phase], texel 1 [walk slot, ., y, .], texel 4 [., ., ., the person's first block (spec row)].
-// The bones are the walk texture's: per slot, columns F + 1 frames, rows 2 B (quaternion row, offset row per bone); a posed joint is P = R(q) j + u with j the rest joint.
+// The bones are the walk texture's: per slot, columns F + 1 frames, rows 3 B (affine matrix rows); neighbouring captured poses blend transformed points.
 import { BONES } from "../../body.js";
 
 export const RINGS = 16, SPEC_TEXELS = 34;
@@ -75,16 +76,15 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const uu = slot.mod(walk.perRow).mul(walk.F + 1).add(phase.mul(walk.F)).add(0.5).div(walk.W).toVar(), row0 = slot.div(walk.perRow).floor().mul(walk.B * 2).toVar();
     const rotate = (q, v) => { const t = cross(q.xyz, v).mul(2).toVar(); return v.add(t.mul(q.w)).add(cross(q.xyz, t)); };
     const bone = (name, rest) => {
-      const b = BI[name], q = wn.sample(vec2(uu, row0.add(2 * b + 0.5).div(walk.hU))).level(0).normalize().toVar(), u = wn.sample(vec2(uu, row0.add(2 * b + 1.5).div(walk.hU))).level(0).xyz;
-      const j = v3(S(rest));
-      return { q, P: rotate(q, j).add(u).toVar() };
+      const pose=walkSample(tsl,wn,slot,phase,BI[name],{perRow:walk.perRow,F:walk.F,W:walk.W,H:walk.hU,B:walk.B});
+      return {rotate:pose.rotate,P:pose.point(v3(S(rest))).toVar()};
     };
     const hips = bone("hips", 20), spine = bone("spine", 21), thL = bone("thighL", 26), thR = bone("thighR", 27), shL = bone("shinL", 28), shR = bone("shinR", 29), fL = bone("footL", 30), fR = bone("footR", 31);
     const toeL = bone("toeL", 22), toeR = bone("toeR", 23);
     const s18 = S(18).toVar(), s17 = S(17).toVar(), s16 = S(16).toVar(), H = s18.w, hemY = s17.w, bend = s18.z, swayAmpl = s18.y.mul(swayAmp), clear = s18.x, ws = s17.y, tuck = s17.z;
     // anchors: the waist (part on the pelvis, part on the spine), the hips, knees, ankles (middles of the two legs), the hem
     const w0 = v3(S(19)), J0 = v3(S(20)), Js = v3(S(21));
-    const a0v = mix(hips.P.add(rotate(hips.q, w0.sub(J0))), spine.P.add(rotate(spine.q, w0.sub(Js))), ws).toVar();
+    const a0v = mix(hips.P.add(hips.rotate(w0.sub(J0))), spine.P.add(spine.rotate(w0.sub(Js))), ws).toVar();
     const a1v = thL.P.add(thR.P).mul(0.5).toVar(), a2v = shL.P.add(shR.P).mul(0.5).toVar(), a3v = fL.P.add(fR.P).mul(0.5).toVar();
     // the path's end: the skirt's anchors are the knees, ankles and floor; a tube of the divided breeches (s32.x, 1) is on one leg (`leg`: 0 the left, 1 the right): its first two anchors are moved from the middle of the
     // pelvis toward its hip joint by the cut's lateral shares, then a share of the way down its thigh, its knee, and a little below the knee along the thigh
@@ -95,7 +95,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const a4v = mix(vec3(a3v.x, min(a3v.y.sub(H.mul(0.01)), hemY), a3v.z), kO.add(td.mul(s32.z)), shrt).toVar();
     const anc = [b0v, b1v, b2v, b3v, a4v];
     // heading and the pelvis axes
-    const pf = rotate(hips.q, vec3(0, 0, 1)).toVar(), pd = rotate(hips.q, vec3(0, -1, 0)).toVar();
+    const pf = hips.rotate(vec3(0, 0, 1)).toVar(), pd = hips.rotate(vec3(0, -1, 0)).toVar();
     const hl = max(sqrt(pf.x.mul(pf.x).add(pf.z.mul(pf.z))), 1e-6), hx = pf.x.div(hl).toVar(), hz = pf.z.div(hl).toVar();
     // the segments of the path
     const segD = [], segL = [], segS = [float(0)];
@@ -106,7 +106,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const caps = [
       { a: thL.P, b: shL.P, ra: s16.x, rb: s16.y, leg: true, on: select(shrt.greaterThan(0.5), float(1).sub(legBit), float(1)) }, { a: shL.P, b: fL.P, ra: s16.z, rb: s16.w, leg: true, on: select(shrt.greaterThan(0.5), float(1).sub(legBit), float(1)) },
       { a: thR.P, b: shR.P, ra: s16.x, rb: s16.y, leg: true, on: select(shrt.greaterThan(0.5), legBit, float(1)) }, { a: shR.P, b: fR.P, ra: s16.z, rb: s16.w, leg: true, on: select(shrt.greaterThan(0.5), legBit, float(1)) },
-      { a: fL.P, b: toeL.P.add(rotate(toeL.q, tipL.sub(jtL))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) }, { a: fR.P, b: toeR.P.add(rotate(toeR.q, tipR.sub(jtR))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) },
+      { a: fL.P, b: toeL.P.add(toeL.rotate(tipL.sub(jtL))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) }, { a: fR.P, b: toeR.P.add(toeR.rotate(tipR.sub(jtR))), ra: s17.x, rb: s17.x.mul(0.8), leg: false, on: float(1).sub(shrt) },
     ].map((c) => ({ ...c, a: c.a, b: c.b }));
     // how far the knees are bent (the train tucks in as they bend)
     let flex = float(0);

@@ -1,3 +1,6 @@
+import { cycleAt, needsWalkBake, advanceBakedPhase, canRebakeAtPhase, childCycles, closestCycle } from "./walk-cache.js";
+import { desiredSpeed } from './pace-walk.js';
+import { walkSample } from './walk-sample.js';
 // The population's drawing (R4, R5; design/r4-plan.md, r5-plan.md): instanced draws, one per tier AND per outfit class, all reading one shared walk
 // texture, so no tier can disagree about anyone's step. Two topologies: the reduced mesh (1.5k vertices) for far and mid, the full
 // drawn body with its base layer and eyes (about 16k) for near.
@@ -10,7 +13,7 @@
 // The far tier's morph basis is fitted on the walking stance, so the three tiers stand alike; the bodies skin on the rig's 21 bones.
 // Each frame, population.tick() sorts the seen into tiers; update() sorts each tier's people into CLASSES and writes each class's people into its agent texture
 // (position, heading, phase, slots, tint, skin, and for a dressed class the garments' colours) and sets its count. People get a walk slot the first time they're seen:
-// their own walker baked into 32 frames (src/people/walk.js), at most `bakeBudgetMs` of baking a frame.
+// their own walker baked into 64 frames (src/people/walk.js), at most `bakeBudgetMs` of baking a frame.
 //
 // CLASSES (R5, design/r5-plan.md "The wardrobe"): a class is an outfit and which of its garments are worn: "base" (the base layer only: everyone with no outfit) or
 // "gentlewoman:3" (outfit id : bit 0 the bodice, bit 1 the skirt; the gentleman's: bit 0 the doublet with its band and shirt, bit 1 his breeches, both in the baked shell, no skirt rings). One instanced draw per (tier, class), each person in the one they belong to this frame, so what she wears is
@@ -33,7 +36,7 @@ import { hairRegion } from "./hair.js";
 import { Fn, If, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, vec4, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross, mix, step, select } from "three/tsl";
 import * as TSL from "three/tsl";
 import { TEMPLATE, NEAR, B, morphBasis } from "./bodies.js";
-import { bakeOne, TEXELS_PER_PERSON } from "./walk.js";
+import { bakePacedCycle, PACE_FRAMES } from "./walk.js";
 import { half, bitsOf, packHalf } from "./half.js";
 import { wearMask } from "./outfits.js";
 import { UVN } from "../spikes/makehuman/index.js";
@@ -41,15 +44,20 @@ import { outfitLayout, bakeNear, bakeReduced, farReducedPositions } from "./garm
 import { OUTFITS } from "./garments/outfit.js";
 import { makeSkirtGPU, writeSpecRow, SPEC_TEXELS } from "./garments/skirt-tsl.js";
 
-const F = 32, KT = 16, WALK_W = 2048, REST_W = 2048;
-const TEXELS = 5, TEXELS_DRESSED = 8;      // plus a final hair RGB/enabled texel; the original four agent texels: [x, z, heading, phase], [walk slot, exact slot, y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
+const F = PACE_FRAMES, KT = 16, WALK_W = 2048, REST_W = 2048;
+const TEXELS = 5, TEXELS_DRESSED = 8;      // plus a final hair RGB/enabled texel; the original four agent texels: [x, z, heading, phase], [walk slot, exact slot (far: hair slot), y, scale], tint, skin; a dressed one three more: [bodice rgb, spec row], [skirt rgb, bodice slot], [stockings rgb]
 const MID_SKIRT = { rings: 16, around: 32 };    // mid's skirt: 32 columns (24 left up to 2.5 cm between it and near's 40 in a stride; 32 is within 1 cm: tools/people/switch-check.mjs)
 const FAR_SKIRT = { rings: 16, around: 24 };    // the far class's skirt: 24 columns, no bridging (16 columns left 3.1 to 3.6% of a dressed person's pixels differing from mid's at 4 to 10 m, over check.mjs's 3%: the hem and the silhouette)
 const LATER_AFTER_UPDATES = 4;               // compile()'s deferred classes start compiling this many frames in
 const BAND_SHADE = 0.62;                   // kind 7's colour: the skirt's, this much of it (the working man's knee band)
 const DRESSED_FAR_CAP = 512;                // dressed people drawn at far at most (each takes a skirt's rings in the passes' textures; a class of two tubes, the gentleman's and the workman's, half as many: the same textures). 256 until the working dress: with four in five dressed, a plaza of 300 has about 340 blocks
 
-export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4, quality } = {}) {
+export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapacity = 16, bakeBudgetMs = 4, quality, overflow = "demote" } = {}) {
+  const setOverflow = (value) => {
+    if (value !== "demote" && value !== "main") throw new Error("people: overflow must be demote or main");
+    overflow = value;
+  };
+  setOverflow(overflow);
   quality = peopleQuality(quality);
   // nobody is ever drawn unclothed: both topologies must carry the base layer's cloth flag
   for (const [name, t] of [["reduced", TEMPLATE], ["near", NEAR]]) if (!t.cloth.some((c) => c)) throw new Error(`people: the ${name} body has no base layer; refusing to draw an unclothed person`);
@@ -67,7 +75,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   };
   const half16 = (src) => { const o = new Uint16Array(src.length); for (let i = 0; i < src.length; i++) o[i] = THREE.DataUtils.toHalfFloat(src[i]); return o; };
 
-  // ---- the shared walk texture: slots of F+1 frames x 2B rows (quaternion row, offset row per bone) ----
+  // ---- shared walk texture: fixed child levels / retained adult cycles, F+1 frames x 2B quaternion/offset rows ----
   // Both slot textures start small and double when full (holo-emitter's trial: 26.6 MB for six people when they were
   // allocated at capacity), keeping every slot where it was; the shaders' texture nodes are pointed at the new one.
   const perRow = Math.floor(WALK_W / (F + 1)), walkW = perRow * (F + 1), rowsFor = (n) => Math.ceil(n / perRow) * 2 * B;
@@ -80,15 +88,14 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   const walkHU = uniform(walkH), walkNodes = [];
   const walkNode = () => { const n = texture(walkTex); walkNodes.push(n); return n; };
   function growWalk() {
-    if (walkCap >= capacity) return false;
-    walkCap = Math.min(capacity, walkCap * 2); const h = rowsFor(walkCap), d = new Uint16Array(walkW * h * 4);
+    if (walkCap >= capacity * 8) return false;
+    walkCap = Math.min(capacity * 8, walkCap * 2); const h = rowsFor(walkCap), d = new Uint16Array(walkW * h * 4);
     d.set(walkData); walkData = d; walkH = h; walkHU.value = h;
     const old = walkTex; walkTex = walkTexture(walkData, h); walkTex.needsUpdate = true; for (const n of walkNodes) n.value = walkTex; old.dispose();
     return true;
   }
   let walkDirty = false, nextWalk = 0;
   const freeWalk = [];
-  const tmp = new Float32Array(TEXELS_PER_PERSON * 4);
 
   // ---- far: the morph basis (deltas of each body parameter, one spread) ----
   const dW = 2048, dH = Math.ceil(V * KT / dW), dd = new Float32Array(dW * dH * 4);
@@ -138,6 +145,20 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   }
   // mid and near are drawn together in a frame at most as many as there are: nobody drawn this frame is evicted
   const stores = { mid: restStore(V, Math.max(1, exactCapacity - nearCapacity), 16), near: restStore(NEAR.V, nearCapacity, 2) };
+  // Capacity is shared by all outfit classes. Keep visible residents first,
+  // then admit new people. Touch residents before any class allocates so LRU
+  // cannot evict a slot another draw still references in this frame.
+  function fitTier(list, store, excess) {
+    if (overflow === "main") return list; // Diagnostic A/B: main admits per class, without shared-slot protection.
+    const selected = [], fresh = [];
+    for (const rec of list) (store.slots.has(rec.id) ? selected : fresh).push(rec);
+    const keep = selected.splice(store.capMax); excess.push(...keep);
+    for (const rec of fresh) (selected.length < store.capMax ? selected : excess).push(rec);
+    for (const rec of selected) if (store.slots.has(rec.id)) {
+      const slot = store.slots.get(rec.id); store.slots.delete(rec.id); store.slots.set(rec.id, slot);
+    }
+    return selected;
+  }
   // the baked bodices (a slot each, of the class's bodice vertices): the near one from the full body, the reduced one (mid and far) from the reduced body; the second also says what each was baked from
   const layouts = {}, gstores = {}, garmentFrom = new Map(), bakes = { garment: 0, body: 0 };
   const layoutOf = (kind, outfit) => (layouts[kind + "|" + outfit.id] ??= (() => {
@@ -326,16 +347,13 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         gstore.nodes.push(rp, rn);
         x0.assign(rp.xyz); n0.assign(rn.xyz);
       };
-      const slot = a1.x, uu = slot.mod(perRow).mul(F + 1).add(a0.w.mul(F)).add(0.5).div(walkW).toVar();
-      const row0 = slot.div(perRow).floor().mul(B * 2).toVar();
+      const slot = a1.x;
       const skin = () => {
         for (const c of ["x", "y", "z", "w"]) {
           const b = float(si[c]), w = sw[c];
-          const q = walk.sample(vec2(uu, row0.add(b.mul(2)).add(0.5).div(walkHU))).level(0).normalize().toVar();
-          const u = walk.sample(vec2(uu, row0.add(b.mul(2)).add(1.5).div(walkHU))).level(0).xyz;
-          const tx = cross(q.xyz, x0).mul(2).toVar(), tn = cross(q.xyz, n0).mul(2).toVar();
-          p.addAssign(x0.add(tx.mul(q.w)).add(cross(q.xyz, tx)).add(u).mul(w));
-          n.addAssign(n0.add(tn.mul(q.w)).add(cross(q.xyz, tn)).mul(w));
+          const pose = walkSample(TSL,walk,slot,a0.w,b,{perRow,F,W:walkW,H:walkHU,B});
+          p.addAssign(pose.point(x0).mul(w));
+          n.addAssign(pose.rotate(n0).mul(w));
         }
       };
       if (!outfit) { bodyPath(); skin(); }
@@ -359,21 +377,75 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
 
   // A walk slot: the person's walker baked once. Returns false if over this frame's budget (drawn from next frame on).
   let budgetLeft = 0, startLater = null, updates = 0;
+  const bakedCycles = new WeakMap();
+  let batchDue = false, nextBatch = 0;
+  const walkCounts = { firstBakes: 0, rebakes: 0, uploadFrames: 0, levelSwitches: 0, slots: 0 };
+  function allocateWalk(n) {
+    // Reuse whole consecutive blocks; child levels must remain adjacent.
+    const i = freeWalk.findIndex(block => block.count >= n);
+    if (i >= 0) {
+      const block = freeWalk[i], slot = block.slot;
+      block.slot += n; block.count -= n;
+      if (!block.count) freeWalk.splice(i, 1);
+      walkCounts.slots += n; return slot;
+    }
+    while (nextWalk + n > walkCap) if (!growWalk()) return -1;
+    const slot = nextWalk; nextWalk += n; walkCounts.slots += n; return slot;
+  }
+  function storeCycle(w, cycle, slot) {
+    bakePacedCycle(w, F, cycle.blend, bakeRows);
+    const bx=(slot%perRow)*(F+1),by=Math.floor(slot/perRow)*2*B;
+    for(let r=0;r<2*B;r++)packHalf(walkData,((by+r)*walkW+bx)*4,bakeBits,r*(F+1)*4,(F+1)*4);
+    walkDirty = true;
+  }
+  function activate(rec, state, cycle, slot) {
+    state.blend = cycle.blend; state.speed = cycle.speed; state.stride = cycle.stride;
+    rec.walkSlot = slot; walkCounts.levelSwitches++;
+  }
   function walkSlot(rec) {
-    if (rec.walkSlot !== undefined) return true;
-    if (budgetLeft <= 0) return false;
-    const t = performance.now();
-    if (!freeWalk.length && nextWalk >= walkCap) growWalk();
-    const slot = freeWalk.length ? freeWalk.pop() : nextWalk < walkCap ? nextWalk++ : -1;
-    if (slot < 0) return false;
     const w = rec.walker;
     if (!w) return false;
-    // bake into a one-person block, then into the shared texture as half floats
-    bakeOne(w, 0, F, 1, F + 1, bakeRows, tmp);
-    const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
-    for (let r = 0; r < 2 * B; r++) packHalf(walkData, ((by + r) * walkW + bx) * 4, bakeBits, r * (F + 1) * 4, (F + 1) * 4);
-    rec.walkSlot = slot; walkDirty = true;
-    hair.prepareFar(rec);
+    const previous = bakedCycles.get(rec);
+    if (previous) {
+      const moved = (rec.walkDistance ?? 0) !== previous.distance;
+      if (!moved) return true;
+      advanceBakedPhase(rec, previous);
+      if (previous.levels) {
+        if (needsWalkBake(w, previous) && (!w.bank || canRebakeAtPhase(w, previous.phase))) {
+          const i = closestCycle(w, previous.levels);
+          if (rec.walkSlot !== previous.base + i) activate(rec, previous, previous.levels[i], previous.base + i);
+        }
+      } else {
+        // A queued adult keeps its old cycle/cadence until the batch is uploaded
+        // and support exchanges. Only one queued cycle per person is retained.
+        if (previous.pending && (!w.bank || canRebakeAtPhase(w, previous.phase))) {
+          const old = rec.walkSlot;
+          activate(rec, previous, previous.pending, previous.spare);
+          previous.spare = old; previous.pending = null;
+        }
+        if (!batchDue || !moved || previous.pending) return true;
+        const targetSpeed = w.bank && rec.doing ? Math.max(w.minSpeed, Math.min(w.maxSpeed,
+          desiredSpeed(w, 0, rec.doing?.opts?.urgency) * (rec.doing?.opts?.pace ?? 1))) : w.v;
+        if (needsWalkBake({v:targetSpeed}, previous)) {
+          if (previous.spare === undefined || previous.spare < 0) previous.spare = allocateWalk(1);
+          if (previous.spare >= 0) {
+            previous.pending = cycleAt({...w, v:targetSpeed});
+            storeCycle(w, previous.pending, previous.spare); walkCounts.rebakes++;
+          }
+        }
+      }
+      return true;
+    }
+    if (budgetLeft <= 0) return false;
+    const t = performance.now(), levels = childCycles(w), n = levels?.length ?? 1;
+    const base = allocateWalk(n);
+    if (base < 0) return false;
+    const cycle = levels ? levels[closestCycle(w, levels)] : cycleAt(w);
+    for (let i = 0; i < n; i++) storeCycle(w, levels ? levels[i] : cycle, base + i);
+    const state = {...cycle, levels, base, count:n, phase:rec.phase, distance:rec.walkDistance ?? 0};
+    rec.walkSlot = base + (levels ? closestCycle(w, levels) : 0);
+    bakedCycles.set(rec, state); rec.walkPhase = state.phase;
+    walkCounts.firstBakes++; hair.prepareFar(rec);
     budgetLeft -= performance.now() - t;
     return true;
   }
@@ -402,7 +474,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     let n = 0;
     if (sh) e.mesh.userData.rowBase = rowBase;
     for (const rec of list) {
-      if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) break;
+      if (sh ? (sh.rows >= sh.cap || (e.skirt && sh.blocks + tubes > sh.cap)) : n >= e.cap) { if (overflow === "main") break; demoted.push(rec); continue; }
       if (!walkSlot(rec)) continue;
       let ex = 0, gslot = 0;
       if (name === "near") {
@@ -418,8 +490,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         gslot = g.slot(rec, () => { bakes.garment++; garmentFrom.set(rec.id, "far"); return bakeReduced(farReducedPositions(rec.far.coef, rec.far.scale), rec.bodyParams, outfit, rec.far.J).bodice; });
       }
       const o = (rowBase + n) * texels * 4, pos = rec.pos;
-      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = rec.phase;
-      D[o + 4] = rec.walkSlot; D[o + 5] = ex; D[o + 6] = pos[1];
+      D[o] = pos[0]; D[o + 1] = pos[2]; D[o + 2] = rec.heading; D[o + 3] = rec.walkPhase ?? rec.phase;
+      D[o + 4] = rec.walkSlot; D[o + 5] = name === "far" ? rec.farHairSlot : ex; D[o + 6] = pos[1];
       const c = outfit ? rgb(rec, "shift", rec.dressing.look.shift) : tint(rec), k = skin(rec);
       D[o + 8] = c[0]; D[o + 9] = c[1]; D[o + 10] = c[2]; D[o + 12] = k[0]; D[o + 13] = k[1]; D[o + 14] = k[2];
       D[o + 15] = rec.height;
@@ -459,6 +531,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
 
   return {
     group,
+    // Benchmark compatibility only; default demotes overflow instead of hiding people.
+    setOverflow,
     dispose() {
       if (disposed) return disposal;
       disposed = true;
@@ -502,12 +576,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       else free();
       return disposal;
     },
-    /** Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
-    update(sorted) {
+    /** `now` is monotonic seconds (defaults to the wall clock); it gates adult upload batches.
+     * Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
+    update(sorted, now = performance.now() / 1000) {
       budgetLeft = bakeBudgetMs;
+      batchDue = now + 1e-9 >= nextBatch;
+      if (batchDue) nextBatch = now + .5;
       hair.begin(); contact.begin();
       if (startLater && ++updates >= LATER_AFTER_UPDATES) { const go = startLater; startLater = null; go(); }
-      const demoted = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
+      const demoted = [], farOverflow = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
       for (const sh of Object.values(dressedTiers)) { sh.rows = 0; sh.blocks = 0; }
       // near first (a person new to it may be demoted to mid this frame), then mid, then far; each class one draw
       const run = (tier, list) => {
@@ -516,12 +593,12 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         for (const [, l] of byClass) {
           const e = entryFor(tier, l[0]);
           if (!e.ready) { for (const rec of l) demoted.push(rec); continue; }          // not compiled yet (compile() defers the near dressed classes): drawn as mid, as when the near body's budget is spent
-          used.add(e); const n = write(e, l, tier === "near" ? demoted : []); finish(e, n); counts[tier] += n;
+          used.add(e); const n = write(e, l, tier === "near" ? demoted : tier === "mid" ? farOverflow : []); finish(e, n); counts[tier] += n;
         }
         return used;
       };
-      const t0 = performance.now(), usedNear = run("near", sorted.near), t1 = performance.now();
-      const usedMid = run("mid", demoted.length ? demoted.concat(sorted.mid) : sorted.mid), t2 = performance.now(), usedFar = run("far", sorted.far), t3 = performance.now();
+      const t0 = performance.now(), usedNear = run("near", fitTier(sorted.near, stores.near, demoted)), t1 = performance.now();
+      const usedMid = run("mid", fitTier(demoted.length ? demoted.concat(sorted.mid) : sorted.mid, stores.mid, farOverflow)), t2 = performance.now(), usedFar = run("far", farOverflow.length ? farOverflow.concat(sorted.far) : sorted.far), t3 = performance.now();
       counts.bakes = { ...bakes }; counts.ms = { near: t1 - t0, mid: t2 - t1, far: t3 - t2 };
       for (const e of entries.values()) if (e.count !== 0 && !usedNear.has(e) && !usedMid.has(e) && !usedFar.has(e)) finish(e, 0);          // a class nobody is in any more is emptied once, not uploaded every frame
       for (const e of entries.values()) if (e.count > 0) counts.classes++;
@@ -533,7 +610,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
           if (sh.blocks > 0) counts.passes += sh.skirt.passes.length;
         }
       }
-      if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; }
+      if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; walkCounts.uploadFrames++; }
+      counts.walk = { ...walkCounts, textureBytes: walkData.byteLength };
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       contact.end();
       counts.contactDraws = contact.mesh.count ? 1 : 0;
@@ -610,7 +688,13 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     },
     /** Free a removed person's slots. */
     release(rec) {
-      if (rec.walkSlot !== undefined) { freeWalk.push(rec.walkSlot); rec.walkSlot = undefined; }
+      if (rec.walkSlot !== undefined) { const state = bakedCycles.get(rec);
+        freeWalk.push({slot:state.base, count:state.count}); walkCounts.slots -= state.count;
+        if (state.spare !== undefined && state.spare >= 0) {
+          // Adult base may be the inactive slot after a swap.
+          freeWalk.at(-1).slot = rec.walkSlot;
+          freeWalk.push({slot:state.spare, count:1}); walkCounts.slots--;
+        } rec.walkSlot = undefined; rec.walkPhase = undefined; bakedCycles.delete(rec); }
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) st.release(rec);
       hair.release(rec);
       garmentFrom.delete(rec.id); rec.nearGarment = undefined; rec.specRow = undefined;

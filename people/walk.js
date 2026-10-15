@@ -1,3 +1,5 @@
+import {half,bitsOf} from './half.js';
+import { makePacedWalker } from './pace-walk.js';
 import { makeMocapWalker, poseMocap } from "./mocap.js";
 // A person's own walk: 100STYLE retargeting in mocap.js by default. The fitted
 // walker below remains selectable with who.walk = "fitted" for comparison.
@@ -125,7 +127,7 @@ function lowestFoot(w, drop) {
 // degrees added to both shoulders (an outfit's arm rest, garments/outfit.js); left out, the arms walk as the data has them. `keepout`: { apply(bones, ctx) }, run on every pose
 // (keepout.js), so a wearer's arms stay out of her clothes; left out, nothing is done.
 export function makeWalker(J, who, basis) {
-  if (who.walk !== "fitted") return makeMocapWalker(J, who);
+  if (who.walk !== "fitted") return who.walk === "neutral" ? makeMocapWalker(J, who) : makePacedWalker(J, who);
   const hipY = J[0][1], H = who.height ?? J[0][1] / 0.53;
   // root "fitted": the data's own pelvis path, 2 ms a person, against 16 ms for the root from the feet (65 against 42 mm
   // of slide a step). The crowd page bakes on the main thread; the engine moves the full root into a worker (R7).
@@ -172,9 +174,24 @@ export function poseInto(w, phase, W, Pp) {
 export const TEXELS_PER_PERSON = 2 * B;
 export function writeBones(w, phase, out, o) {
   poseCore(w, phase);
+  writePose(w, out, o);
+}
+const textureQuaternion = new Float32Array(4), textureQuaternionBits = bitsOf(textureQuaternion);
+function writePose(w, out, o) {
   const J = w.J, Wm = w.Wm, Pm = w.Pm;
   for (let b = 0; b < B; b++) {
     const mo = b * 9, j = J[b], k = o + b * 8;
+    if (w.bank) {
+      // Newton polar iteration: nearest proper rotation of the blended captures.
+      // Capture pairs stay far from the singular/opposite-rotation case.
+      for(let iteration=0;iteration<5;iteration++) {
+        const a=Wm[mo],b=Wm[mo+1],c=Wm[mo+2],d=Wm[mo+3],e=Wm[mo+4],f=Wm[mo+5],g=Wm[mo+6],h=Wm[mo+7],i=Wm[mo+8];
+        const A=e*i-f*h,B=f*g-d*i,C=d*h-e*g,det=a*A+b*B+c*C;
+        Wm[mo]=.5*(a+A/det);Wm[mo+1]=.5*(b+B/det);Wm[mo+2]=.5*(c+C/det);
+        Wm[mo+3]=.5*(d+(c*h-b*i)/det);Wm[mo+4]=.5*(e+(a*i-c*g)/det);Wm[mo+5]=.5*(f+(b*g-a*h)/det);
+        Wm[mo+6]=.5*(g+(b*f-c*e)/det);Wm[mo+7]=.5*(h+(c*d-a*f)/det);Wm[mo+8]=.5*(i+(a*e-b*d)/det);
+      }
+    }
     // rotation matrix (row-major) to quaternion, the numerically stable branch
     const m00 = Wm[mo], m11 = Wm[mo + 4], m22 = Wm[mo + 8], tr = m00 + m11 + m22;
     let x, y, z, qw;
@@ -182,7 +199,21 @@ export function writeBones(w, phase, out, o) {
     else if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; qw = (Wm[mo + 7] - Wm[mo + 5]) / s; x = 0.25 * s; y = (Wm[mo + 1] + Wm[mo + 3]) / s; z = (Wm[mo + 2] + Wm[mo + 6]) / s; }
     else if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; qw = (Wm[mo + 2] - Wm[mo + 6]) / s; x = (Wm[mo + 1] + Wm[mo + 3]) / s; y = 0.25 * s; z = (Wm[mo + 5] + Wm[mo + 7]) / s; }
     else { const s = Math.sqrt(1 + m22 - m00 - m11) * 2; qw = (Wm[mo + 3] - Wm[mo + 1]) / s; x = (Wm[mo + 2] + Wm[mo + 6]) / s; y = (Wm[mo + 5] + Wm[mo + 7]) / s; z = 0.25 * s; }
-    out[k] = x; out[k + 1] = y; out[k + 2] = z; out[k + 3] = qw;
+    if(w.bank){
+      // Project the blended matrix onto a unit quaternion, then recompute
+      // the offset from the unchanged affine joint position.
+      if(w.texturePose) {
+        // Account for the actual RGBA16F quaternion before forming P - Rj.
+        // Filtering still uses main's unchanged normalized-quaternion sampler.
+        const q=textureQuaternion,bits=textureQuaternionBits;q[0]=x;q[1]=y;q[2]=z;q[3]=qw;
+        for(let c=0;c<4;c++){const h=half(bits[c]),e=(h>>10)&31,m=h&1023;q[c]=(h&32768?-1:1)*(e?2**(e-15)*(1+m/1024):2**-14*m/1024);}
+        [x,y,z,qw]=q;
+        out[k]=x;out[k+1]=y;out[k+2]=z;out[k+3]=qw;
+      }
+      const n=Math.hypot(x,y,z,qw);x/=n;y/=n;z/=n;qw/=n;
+      Wm.set([1-2*(y*y+z*z),2*(x*y-z*qw),2*(x*z+y*qw),2*(x*y+z*qw),1-2*(x*x+z*z),2*(y*z-x*qw),2*(x*z-y*qw),2*(y*z+x*qw),1-2*(x*x+y*y)],mo);
+    }
+    if(!w.texturePose) { out[k] = x; out[k + 1] = y; out[k + 2] = z; out[k + 3] = qw; }
     out[k + 4] = Pm[b * 3] - (Wm[mo] * j[0] + Wm[mo + 1] * j[1] + Wm[mo + 2] * j[2]);
     out[k + 5] = Pm[b * 3 + 1] - (Wm[mo + 3] * j[0] + Wm[mo + 4] * j[1] + Wm[mo + 5] * j[2]);
     out[k + 6] = Pm[b * 3 + 2] - (Wm[mo + 6] * j[0] + Wm[mo + 7] * j[1] + Wm[mo + 8] * j[2]);
@@ -195,11 +226,12 @@ export function writeBones(w, phase, out, o) {
 // takes 2B rows (quaternion row, offset row per bone). Quaternions keep one sign along the cycle so filtering between
 // frames never flips through the long way round. When a person's walk changes (mood, load), rebake their block.
 export function bakeOwn(walkers, F = 32, maxWidth = 2048) {
+  const paced=false;
   const N = walkers.length, perRow = Math.max(1, Math.floor(maxWidth / (F + 1)));
   const W = Math.min(N, perRow) * (F + 1), rows = Math.ceil(N / perRow), H = rows * 2 * B;
   const data = new Float32Array(W * H * 4), tmp = new Float32Array(TEXELS_PER_PERSON * 4);
   walkers.forEach((w, i) => bakeOne(w, i, F, perRow, W, data, tmp));
-  return { data, W, H, perRow, F };
+  return { data, W, H, perRow, F, paced };
 }
 const prev = new Float32Array(B * 4), stash = new Float32Array((DROP_FRAMES + 1) * TEXELS_PER_PERSON * 4);
 export function bakeOne(w, i, F, perRow, W, data, tmp = new Float32Array(TEXELS_PER_PERSON * 4)) {
@@ -227,4 +259,61 @@ export function bakeOne(w, i, F, perRow, W, data, tmp = new Float32Array(TEXELS_
       data[u] = frames[o + 4]; data[u + 1] = frames[o + 5] - shift; data[u + 2] = frames[o + 6]; data[u + 3] = frames[o + 7];
     }
   }
+}
+
+// Affine matrices keep planted points linear between frames. This avoids the
+// quaternion interpolation's contact drift without doubling capture samples.
+export function bakeAffine(w,i,F,perRow,W,data) {
+ const bx=i%perRow*(F+1),by=Math.floor(i/perRow)*B*3;
+ for(let f=0;f<F;f++){
+  poseCore(w,f/F);
+  for(let b=0;b<B;b++)for(let r=0;r<3;r++){
+   const m=b*9+r*3,o=((by+b*3+r)*W+bx+f)*4,j=w.J[b];
+   data[o]=w.Wm[m];data[o+1]=w.Wm[m+1];data[o+2]=w.Wm[m+2];
+   data[o+3]=w.Pm[b*3+r]-w.Wm[m]*j[0]-w.Wm[m+1]*j[1]-w.Wm[m+2]*j[2];
+  }
+ }
+ for(let r=0;r<B*3;r++){const o=((by+r)*W+bx)*4;data.copyWithin(o+F*4,o,o+4);}
+}
+export function bakePaceBank(walkers,F=32,maxWidth=2048){
+ const all=walkers.flatMap(w=>w.bank??[w,w,w]),perRow=Math.max(1,Math.floor(maxWidth/(F+1))),W=Math.min(all.length,perRow)*(F+1),H=Math.ceil(all.length/perRow)*B*3,data=new Float32Array(W*H*4);
+ all.forEach((w,i)=>bakeAffine(w,i,F,perRow,W,data));return {data,W,H,F,perRow,paced:true,affine:true};
+}
+
+// Capture frames belong to the walker (and therefore to its outfit/keep-out).
+// Cache only captures actually used. A speed change blends arrays, not poses.
+const captureFrames = new WeakMap();
+// The 32-frame affine bake interpolated contacts linearly. Normalized quaternion
+// interpolation needs 64 samples to keep the same <= 0.25 cm planted-toe limit.
+// Layout and shader fetches remain main's two rows per bone.
+export const PACE_FRAMES = 64;
+export function bakePacedCycle(w, F = PACE_FRAMES, blend = w.blend ?? 0, out = new Float32Array((F + 1) * B * 2 * 4)) {
+  if (!w.bank) { bakeOne(w, 0, F, 1, F + 1, out); return out; }
+  let cache = captureFrames.get(w);
+  if (!cache || cache.F !== F) { cache = { F, frames: [] }; captureFrames.set(w, cache); }
+  const frame = i => {
+    if (!cache.frames[i]) {
+      const data = new Float32Array((F + 1) * B * 3 * 4);
+      bakeAffine(w.bank[i], 0, F, 1, F + 1, data); cache.frames[i] = data;
+    }
+    return cache.frames[i];
+  };
+  const i = Math.min(w.bank.length - 2, Math.floor(blend)), t = blend - i, a = frame(i), b = frame(i + 1);
+  const pose = {J:w.J, bank:true, texturePose:true, Wm:new Float64Array(B*9), Pm:new Float64Array(B*3)};
+  const tmp = new Float32Array(B*8), previous = new Float32Array(B*4);
+  for(let f=0;f<=F;f++) {
+    for(let bone=0;bone<B;bone++)for(let r=0;r<3;r++) {
+      const o=((bone*3+r)*(F+1)+f)*4,m=bone*9+r*3,j=w.J[bone];
+      for(let c=0;c<3;c++)pose.Wm[m+c]=a[o+c]+(b[o+c]-a[o+c])*t;
+      pose.Pm[bone*3+r]=a[o+3]+(b[o+3]-a[o+3])*t+pose.Wm[m]*j[0]+pose.Wm[m+1]*j[1]+pose.Wm[m+2]*j[2];
+    }
+    writePose(pose,tmp,0);
+    for(let bone=0;bone<B;bone++) {
+      const k=bone*8,q=(bone*2*(F+1)+f)*4,u=q+(F+1)*4;
+      let dot=0;for(let c=0;c<4;c++)dot+=previous[bone*4+c]*tmp[k+c];
+      const sign=f>0&&dot<0?-1:1;
+      for(let c=0;c<4;c++){out[q+c]=previous[bone*4+c]=tmp[k+c]*sign;out[u+c]=tmp[k+4+c];}
+    }
+  }
+  return out;
 }

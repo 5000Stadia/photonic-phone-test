@@ -1,3 +1,4 @@
+import { walkSample } from './walk-sample.js';
 // Core and rim batches per near/mid style. All styles share the tier's materials,
 // atlas, agent texture and rest store, and the people's walk texture.
 import * as T from 'three/tsl';
@@ -39,14 +40,11 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       const gi=T.int(b.y).mul(store.V).add(T.int(T.vertexIndex)).mul(2);
       const p=T.textureLoad(store.tex,T.ivec2(gi.mod(REST_W),gi.div(REST_W))), n=T.textureLoad(store.tex,T.ivec2(gi.add(1).mod(REST_W),gi.add(1).div(REST_W)));
       store.nodes.push(p,n);
-      const u=b.x.mod(perRow).mul(F+1).add(a.w.mul(F)).add(.5).div(walkW);
-      const r=b.x.div(perRow).floor().mul(B*2).add(HEAD*2);
-      const q=walk.sample(T.vec2(u,r.add(.5).div(walkHU))).level(0).normalize(), offset=walk.sample(T.vec2(u,r.add(1.5).div(walkHU))).level(0).xyz;
-      const rotate=x=>x.add(T.cross(q.xyz,x).mul(2).mul(q.w)).add(T.cross(q.xyz,T.cross(q.xyz,x).mul(2)));
-      const x=rotate(p.xyz).add(offset), nn=rotate(n.xyz), ch=T.cos(a.z),sh=T.sin(a.z);
+      const pose=walkSample(T,walk,b.x,a.w,HEAD,{perRow,F,W:walkW,H:walkHU,B});
+      const x=pose.point(p.xyz), nn=pose.rotate(n.xyz), ch=T.cos(a.z),sh=T.sin(a.z);
       const turn=v=>T.vec3(v.x.mul(ch).add(v.z.mul(sh)),v.y,v.z.mul(ch).sub(v.x.mul(sh)));
       T.normalLocal.assign(turn(nn).normalize());
-      T.tangentLocal.assign(turn(rotate(T.attribute('tangent','vec4').xyz)).normalize());
+      T.tangentLocal.assign(turn(pose.rotate(T.attribute('tangent','vec4').xyz)).normalize());
       return turn(x).add(T.vec3(a.x,b.z,a.y));
     })();
     mats.rim.positionNode=m.positionNode;
@@ -70,7 +68,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
     e={key,tier,id,mesh,rim,material:st.m};entries.push(e,{mesh:rim,material:st.mats.rim});entryMap.set(key,e);return e;
   }
   // Far reads the body's agent rows directly. Each style tests immutable metadata
-  // keyed by walkSlot in the vertex shader; nonmatching instances collapse to a point.
+  // keyed by a stable hair slot in the vertex shader; nonmatching instances collapse to a point.
   // This trades some cheap rejected vertices for no per-person hair work on the CPU.
   const farStore=restStore(Math.max(...Object.values(HAIR.styles).map(s=>s.far.vertices.length)),tiers.far.cap,16);
   const farMeta=new Float32Array(tiers.far.cap*4);
@@ -79,7 +77,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
   function attachFar(body) {
     const row=T.uniform(0,'int').onObjectUpdate(function({object}){this.value=object.userData.body.mesh.userData.rowBase??0;});
     const i=T.int(T.instanceIndex).add(row), a=T.textureLoad(body.tex,T.ivec2(0,i)), b=T.textureLoad(body.tex,T.ivec2(1,i));
-    const meta=T.textureLoad(farTex,T.ivec2(0,T.int(b.x)));
+    const meta=T.textureLoad(farTex,T.ivec2(0,T.int(b.y)));
     const style=T.uniform(0).onObjectUpdate(function({object}){this.value=object.userData.style;});
     const m=new THREE.MeshStandardNodeMaterial({roughness:.85,side:THREE.DoubleSide});
     m.colorNode=T.varying(meta.rgb);
@@ -87,15 +85,13 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
     m.positionNode=T.Fn(()=>{
       const p=T.vec3(0).toVar();
       T.If(meta.w.equal(style),()=>{
-        const gi=T.int(b.x).mul(farStore.V).add(T.int(T.vertexIndex)).mul(2);
+        const gi=T.int(b.y).mul(farStore.V).add(T.int(T.vertexIndex)).mul(2);
         const rp=T.textureLoad(farStore.tex,T.ivec2(gi.mod(REST_W),gi.div(REST_W))), rn=T.textureLoad(farStore.tex,T.ivec2(gi.add(1).mod(REST_W),gi.add(1).div(REST_W)));
         farStore.nodes.push(rp,rn);
-        const u=b.x.mod(perRow).mul(F+1).add(a.w.mul(F)).add(.5).div(walkW), r=b.x.div(perRow).floor().mul(B*2).add(HEAD*2);
-        const q=walk.sample(T.vec2(u,r.add(.5).div(walkHU))).level(0).normalize(), offset=walk.sample(T.vec2(u,r.add(1.5).div(walkHU))).level(0).xyz;
-        const rotate=x=>x.add(T.cross(q.xyz,x).mul(2).mul(q.w)).add(T.cross(q.xyz,T.cross(q.xyz,x).mul(2)));
+        const pose=walkSample(T,walk,b.x,a.w,HEAD,{perRow,F,W:walkW,H:walkHU,B});
         const ch=T.cos(a.z),sh=T.sin(a.z),turn=x=>T.vec3(x.x.mul(ch).add(x.z.mul(sh)),x.y,x.z.mul(ch).sub(x.x.mul(sh)));
-        p.assign(turn(rotate(rp.xyz).add(offset)).add(T.vec3(a.x,b.z,a.y)));
-        T.normalLocal.assign(turn(rotate(rn.xyz)).normalize());
+        p.assign(turn(pose.point(rp.xyz)).add(T.vec3(a.x,b.z,a.y)));
+        T.normalLocal.assign(turn(pose.rotate(rn.xyz)).normalize());
       });
       return p;
     })();
@@ -109,10 +105,12 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       const e={mesh,material:m,body};farEntries.push(e);entries.push(e);
     }
   }
+  let nextFar = 0;
+  const freeFar = [];
   function prepareFar(rec) {
-    const slot=rec.walkSlot;
+    const slot = rec.farHairSlot ??= freeFar.length ? freeFar.pop() : nextFar++;
     farMeta.set([...rec.hair.colour,HAIR_STYLES.indexOf(rec.hair.style)+1],slot*4);farTex.needsUpdate=true;
-    // Slot identity is the body's persistent walk slot; never an LRU touched each frame.
+    // Hair identity is independent of the selected animation level.
     if(rec.hair.style) {
       while(farStore.cap<=slot)farStore.grow();
       const fitted=fitHair(rec.hair.style,'far',farReducedPositions(rec.far.coef,rec.far.scale),rec.bodyParams);
@@ -149,7 +147,7 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
       }else {s.store.slots.delete(rec.id);s.store.slots.set(rec.id,slot);}
       e.rim.count++;
       const o=(e.mesh.count++*18+e.mesh.userData.rowBase)*4,d=s.data;s.rows++;
-      d[o]=rec.pos[0];d[o+1]=rec.pos[2];d[o+2]=rec.heading;d[o+3]=rec.phase;
+      d[o]=rec.pos[0];d[o+1]=rec.pos[2];d[o+2]=rec.heading;d[o+3]=rec.walkPhase ?? rec.phase;
       d[o+4]=rec.walkSlot;d[o+5]=slot;d[o+6]=rec.pos[1];
       d[o+8]=rec.hair.colour[0];d[o+9]=rec.hair.colour[1];d[o+10]=rec.hair.colour[2];
       return elapsed;
@@ -160,7 +158,10 @@ export function makeHairDraw(THREE, { group, restStore, tiers, walkNode, walkHU,
         if(s.rows)s.tex.needsUpdate=true;if(s.store.dirty){s.store.tex.needsUpdate=true;s.store.dirty=false;}
       }return entries.filter(e=>e.mesh.count>0).length;
     },
-    release(rec){for(const s of Object.values(states))s.store.release(rec);},
+    release(rec){
+      if(rec.farHairSlot!==undefined){freeFar.push(rec.farHairSlot);rec.farHairSlot=undefined;}
+      for(const s of Object.values(states))s.store.release(rec);
+    },
     bytes(){return farMeta.byteLength+farStore.data.byteLength+Object.values(states).reduce((n,s)=>n+s.data.byteLength+s.store.data.byteLength,0)+canvas.width*canvas.height*4;},
   };
 }

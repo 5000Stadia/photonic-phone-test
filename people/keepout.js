@@ -130,6 +130,26 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
       return out;
     },
     apply(bones, ctx = {}) {
+      // The pace bank uses the padded, offline garment/body-class openings.
+      // Keep the captured swing; only rotate the whole arm about the chest axis.
+      // The extra three degrees cover interpolation and class quantisation, checked
+      // against the held-out mesh sweep at all bank endpoints and blends.
+      const cached=ctx.cachedOpening&&this.openingCycle?.[ctx.captureIndex]?.[Math.round(ctx.capturePhase*32)%32];
+      if(cached&&cached.every(v=>Number.isFinite(v)&&(ctx.captureIndex<2||v<.4))) {
+        const {W,P}=bones,chest=BI.chest*9;
+        for(let side=0;side<2;side++){
+          const sd=sides[side],sg=side?-1:1,angle=cached[side]+Math.PI/60;
+          const ax=W[chest+2]*sg,ay=W[chest+5]*sg,az=W[chest+8]*sg,c=Math.cos(angle),sn=Math.sin(angle),t=1-c;
+          const R=[t*ax*ax+c,t*ax*ay-sn*az,t*ax*az+sn*ay,t*ax*ay+sn*az,t*ay*ay+c,t*ay*az-sn*ax,t*ax*az-sn*ay,t*ay*az+sn*ax,t*az*az+c];
+          const o=sd.up*3,x=P[o],y=P[o+1],z=P[o+2];
+          for(const b of [sd.up,sd.fo,sd.ha]){const m=b*9,q=b*3;
+            W0.set(W.subarray(m,m+9));m3(W.subarray(m,m+9),R,W0.subarray(0,9));
+            vm(R,P[q]-x,P[q+1]-y,P[q+2]-z,tmp3);P[q]=x+tmp3[0];P[q+1]=y+tmp3[1];P[q+2]=z+tmp3[2];
+          }
+          openings[side]=angle;
+        }
+        return;
+      }
       extraClearance = (ctx.extraClearance ?? 0) * u;
       vols.length = 0; for (const v of volumes(bones, ctx)) vols.push(v);
       if (!vols.length) return;
@@ -176,7 +196,7 @@ export function armKeepOut(J, H, volumes, { clearance = 0.008, iterations = 4 } 
             return true;
           };
           let lo = 0, hi = 0, cleared;
-          const hint = ctx.capturePhase === undefined ? null : this.openingCycle?.[Math.round(ctx.capturePhase*32)%32]?.[side];
+          const hint = ctx.capturePhase === undefined ? null : this.openingCycle?.[ctx.captureIndex??1]?.[Math.round(ctx.capturePhase*32)%32]?.[side];
           if(hint !== undefined && hint !== null) {
             // The cached garment/body correction starts the person's exact
             // clearance. Verify against their own volumes; never trust a bin

@@ -20,9 +20,9 @@ export const PEOPLE_API = "photonic.people/1";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality } = {}) {
-  let pop = makePopulation({ ctx, basis, thresholds, planBudget, ...(outfits !== undefined ? { outfits } : {}) });
-  let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality });
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = false } = {}) {
+  let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, ...(outfits !== undefined ? { outfits } : {}) });
+  let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
   const speaking = new Map();       // id -> { line, start, end, to }
   let now = 0, extra = [], counts = { near: 0, mid: 0, far: 0, classes: 0, passes: 0 };
@@ -83,6 +83,8 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
 
   const api = guarded({
     group: draw.group,
+    setSamePace: (value) => pop.setSamePace(value),
+    setOverflow: (value) => draw.setOverflow(value),
     /** Make the draws a renderer will need (the base class, and the placeholder rule's four outfits (gentlewoman, gentleman, workwoman, workman) unless `outfits` is false or a rule of your own, whose outfits `list` names) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
      *  behind a loading screen instead of at the first frame. Returns how many draws there are. Draws made later, for a class not warmed, still come when someone is first in it. */
     warm: (list) => draw.warm(list ?? (outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN])),

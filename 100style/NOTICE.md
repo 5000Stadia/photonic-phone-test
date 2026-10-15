@@ -27,3 +27,31 @@ per-bone rest alignment onto the 21-bone MakeHuman rig, leg-length/Froude scalin
 ±15% shoulder amplitude, slight posture/build offsets, seeded phase, root contact
 cleanup, minimal floor-contact leg IK and garment keep-out. These derivatives retain the attribution and
 CC BY 4.0 obligations above. Source BVH bytes are unchanged.
+
+## Photonic pace bank (100style-pace-v2)
+
+- **What:** `Neutral_slow.bvh`, 80 frames, original file frames **6038–6117**
+  inclusive (0-based). Source member `100STYLE/Neutral/Neutral_FW.bvh`.
+  **Changes made:** motion rows outside that range removed and `Frames` updated;
+  hierarchy, frame interval and retained numeric rows unchanged.
+- **What:** `Rushed_urgent.bvh`, 47 frames, original file frames **2835–2881**
+  inclusive (0-based). Source member `100STYLE/Rushed/Rushed_FW.bvh`.
+  **Changes made:** motion rows outside that range removed and `Frames` updated;
+  hierarchy, frame interval and retained numeric rows unchanged.
+- **Source:** 100STYLE.zip, Zenodo record 8127870,
+  https://doi.org/10.5281/zenodo.8127870. The lead retrieved these full members
+  by ZIP byte ranges on 2026-10-15 and checked ASCII BVH headers/numbers.
+- **Licence and attribution:** CC BY 4.0 International; Ian Mason, Sebastian
+  Starke and Taku Komura; paper and licence text as credited above.
+- **Runtime derivatives:** these cycles and the existing Neutral 571–651 cycle
+  undergo heading/travel removal, periodic seam correction, retargeting and
+  contact cleanup as described above. Phase-matched affine skin transforms
+  blend neighbouring captures. Stride distance and cycle rate change together.
+  Only the fast endpoint on under-five rigs uses a timing margin (up to +8%,
+  fading to zero at five). No fabricated running/skipping is used.
+  Garment openings use padded, quantised body-class corrections, with exact
+  refinement for the urgent clip where needed. These derivatives remain
+  attributed under CC BY 4.0.
+
+Only the two new trims are added: **95,381 bytes uncompressed**. Full source
+walks, runs, Old, Skip and BigSteps are not redistributed by this change.

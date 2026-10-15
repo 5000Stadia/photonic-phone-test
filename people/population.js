@@ -1,3 +1,4 @@
+import {desiredSpeed,setWalkSpeed} from './pace-walk.js';
 // The population's data layer (R4; design/r4-plan.md): the people store, ranks, tiers, walking, presence, rooms, state,
 // events and hit, in pure JS with no three.js, so node tests it. draw.js reads what tick() returns; index.js wires the
 // two into makePeople (design/interface.md).
@@ -32,7 +33,7 @@ class Person {
     this.vel = undefined; this.aside = undefined; this.waited = undefined; this.progress = undefined; this.touching = undefined;
     this.contacts = new Map(); this.recovery = null; this.moveLeft = 0; this.tickX = 0; this.tickZ = 0;
     this.offRoute = undefined; this.lastGood = undefined; this.replan = undefined;
-    this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this._cstockings = undefined; this._cbare = undefined; this.nearGarment = undefined; this.specRow = undefined;
+    this.walkDistance = 0; this.walkPhase = undefined; this.walkSlot = undefined; this.tint = undefined; this.skin = undefined; this._cshift = undefined; this._cbodice = undefined; this._cskirt = undefined; this._cstockings = undefined; this._cbare = undefined; this.nearGarment = undefined; this.specRow = undefined;
     this.hair = hairFor(this.values, this.seed, this.res.derived, Object.fromEntries((typeof this.res.recipe.said === "string" ? parse(this.res.recipe.said).constraints : this.res.recipe.said.constraints ?? []).map(c => [c.trait,true])));
     this._hairBody = null;
     this._params = null; this._body = null; this._far = null; this._walker = undefined; this._dressing = undefined; this._attire = null; this._whole = null; this._garments = undefined; this._prefer = null; this._speed = undefined; this._rate = undefined;
@@ -98,11 +99,13 @@ class Person {
   get walker() {
     if (this._walker !== undefined) return this._walker;
     const v = this.res.values, basis = this.env.basis;
-    return (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
+    const w = (this._walker = basis ? makeWalker(this.far.J, { age: v.age, sex: v.sex === "male" ? 1 : v.sex === "female" ? -1 : 0, seed: seedOf(`${this.seed}:${this.id}:walk`), walk: this.env.walk, samePace: this.env.samePace, height: this.height, build: this.bodyParams.build, keepout: this.dressing?.keepout }, basis) : null);
+    if(w?.bank&&this.paceState)setWalkSpeed(w,this.paceState.speed);
+    return w;
   }
-  // the walker's speed and cadence never change once it is made (walk.js makeWalker), so they are read once
-  get speed() { return (this._speed ??= this.walker ? this.walker.v : 1.3); }
-  get rate() { return (this._rate ??= this.walker ? this.walker.f : 0.9); }
+  // Pace-bank speed and cadence change together; the legacy fitted plan is fixed.
+  get speed() { return this.walker?.bank ? this.walker.v : (this._speed ??= this.walker ? this.walker.v : 1.3); }
+  get rate() { return this.walker?.bank ? this.walker.f : (this._rate ??= this.walker ? this.walker.f : 0.9); }
   get built() { return this._body !== null; }
 }
 
@@ -119,11 +122,12 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.basis       the fitted gait basis (spikes/gait/data/gait-basis.json, loaded)
  * @param opts.thresholds  { near, mid } in metres at middle rank
  * @param opts.walk        "mocap" (default) or "fitted" for the previous harmonic walker
+ * @param opts.samePace    diagnostic: retain the pace bank at each body's Neutral capture speed
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, outfits = outfitFor } = {}) {
-  const env = { outfits, basis, walk };
+export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = false, outfits = outfitFor } = {}) {
+  const env = { outfits, basis, walk, samePace };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown
@@ -171,6 +175,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     roomSet(rec.room).add(id);
     hold(rec);
     if (st.doing?.verb === "goTo") goTo(id, st.doing.target, st.doing.opts);
+    if(st.paceState) {rec.paceState={...st.paceState};if(rec.walker?.bank)setWalkSpeed(rec.walker,rec.paceState.speed);}
     return rec;
   }
 
@@ -195,8 +200,25 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     return target.pos ?? null;
   };
 
+  function updatePace(rec,dt) {
+    const w=rec.walker;if(!w?.bank)return;
+    const p=rec.paceState??={time:0,speed:w.v,tripTime:1,tripStart:w.v};
+    const varying=w.age>=4&&w.age<15;
+    if(!varying&&p.tripTime>=.8)return;
+    if(varying)p.time=Math.round((p.time+dt)*1e9)/1e9;
+    p.tripTime=Math.min(.8,Math.round((p.tripTime+dt)*1e9)/1e9);
+    if(rec.doing&&(rec.doing.opts?.pace??1)>0) {
+      const target=desiredSpeed(w,p.time,rec.doing.opts?.urgency)*(rec.doing.opts?.pace??1);
+      const t=Math.min(1,p.tripTime/.8),ease=t*t*(3-2*t);
+      setWalkSpeed(w,p.tripStart+(target-p.tripStart)*ease);p.speed=w.v;
+    }
+  }
   function catchUp(rec) {
-    if (rec.lastClock < clock) { step(rec, clock - rec.lastClock); rec.lastClock = clock; }
+    if(!rec.walker?.bank){if(rec.lastClock<clock){step(rec,clock-rec.lastClock);rec.lastClock=clock;}return;}
+    // Variable pace cannot use a constant-speed arrival shortcut. Hidden people
+    // use bounded time slices and retain the same seeded personal clock.
+    while(rec.lastClock<clock-1e-9) {const dt=Math.min(1/60,clock-rec.lastClock);updatePace(rec,dt);step(rec,dt);rec.lastClock+=dt;}
+    rec.lastClock=clock;
   }
 
   // goTo: the route may come at once, later (a Promise), or in slices (a stepper the tick advances within planBudget
@@ -209,6 +231,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     // babies don't walk: carried on a hip or in arms (carry.carrier, a later milestone), so goTo says so instead
     if (rec.values.age < 0.9) { queue.push({ type: "cannot_walk", id: rec.id, reason: "a baby is carried, not walked" }); return false; }
     const r = ctx.walk?.route ? ctx.walk.route(rec.pos, to, rec.floor, rec.half) : [to];   // routes fit this body
+    if(rec.walker?.bank) {const p=rec.paceState??={time:0,speed:rec.speed};p.tripTime=0;p.tripStart=rec.speed;}
     const token = ++rec.goToken;
     rec.doing = { verb: "goTo", target, opts, route: null, leg: 0, token, planning: true };
     if (r && typeof r.then === "function") { r.then(route => { if (rec.doing?.token === token) setRoute(rec, route); }, () => { if (rec.doing?.token === token) setRoute(rec, null); }); return true; }
@@ -223,7 +246,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     d.route = route.map(p => p.slice()); d.planning = false; rec.lastClock = clock;
     let len = 0, prev = rec.pos;
     for (const p of d.route) { len += Math.hypot(p[0] - prev[0], p[2] - prev[2]); prev = p; }
-    heapPush({ time: clock + len / (rec.speed * (d.opts?.pace ?? 1)), id: rec.id, token: d.token });
+    heapPush({ time: clock + len / (rec.speed * (rec.walker?.bank ? 1 : (d.opts?.pace ?? 1))), id: rec.id, token: d.token });
     return true;
   }
 
@@ -306,26 +329,60 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   const standAt = (rec, x, z) => (ctx.walk?.stand ? ctx.walk.stand([x, rec.pos[1], z], rec.floor, rec.half) : rec.pos[1]);
   const STRAIGHT = Object.freeze({ turn: 0, pace: 1 });
   // the soonest contact (seconds) of a velocity (ux, uz) with the neighbours; a candidate velocity costs its straying plus penalty(tmin)
+  const collisionX=new Float64Array(8),collisionZ=new Float64Array(8),collisionC=new Float64Array(8),collisionVX=new Float64Array(8),collisionVZ=new Float64Array(8);
   function tminOf(rec, ux, uz) {
     const rx = rec.pos[0], rz = rec.pos[2];
     let tmin = Infinity;
     for (let i = 0; i < nbN; i++) {
       const o = nb[i];
-      const t = ttc(o.pos[0] - rx, o.pos[2] - rz, ux - o.vel[0], uz - o.vel[1], rec.half + o.half + AV.margin);
+      let t;
+      if(rec._walker?.bank){
+        const vx=ux-collisionVX[i],vz=uz-collisionVZ[i],c=collisionC[i],b=collisionX[i]*vx+collisionZ[i]*vz;
+        if(c<0)t=b>0?0:Infinity;
+        else {const a=vx*vx+vz*vz,disc=b*b-a*c;t=b<=0||a<1e-9||disc<=0?Infinity:(b-Math.sqrt(disc))/a;}
+      } else t=ttc(o.pos[0]-rx,o.pos[2]-rz,ux-o.vel[0],uz-o.vel[1],rec.half+o.half+AV.margin);
+      if(t===0)return 0;
       if (t < tmin) tmin = t;
     }
     return tmin;
   }
   const penalty = (tmin) => (tmin < AV.horizon ? 3 * (AV.horizon - tmin) / AV.horizon : 0);
   const SPEEDS = [1, 0.55];
+  // All candidate headings see the same contact geometry. Resolve the map and
+  // compute each distance once per decision, rather than once per heading.
+  const contactX = [], contactZ = [], contactLimit = [];
+  let contactN = 0;
+  function prepareClearance(rec) {
+    contactN = 0;
+    for (const [id, c] of rec.contacts) {
+      const o = people.get(id);
+      if (!o || o.presence === "offscene" || o.floor !== rec.floor || c.until <= clock) { rec.contacts.delete(id); continue; }
+      const x = o.pos[0] - rec.pos[0], z = o.pos[2] - rec.pos[2], d = Math.hypot(x, z);
+      contactX[contactN] = x; contactZ[contactN] = z;
+      contactLimit[contactN++] = Math.max(0, d - rec.half - o.half - 0.001) * d;
+    }
+  }
+  function candidateClearance(dx, dz) {
+    let scale = 1;
+    for (let i = 0; i < contactN; i++) {
+      const closing = dx * contactX[i] + dz * contactZ[i];
+      if (closing > 0) scale = Math.min(scale, contactLimit[i] / closing);
+    }
+    return scale;
+  }
   function choose(rec, dx, dz, v, stepLen) {
     neighbours(rec);
+    prepareClearance(rec);
+    if(rec._walker?.bank)for(let i=0;i<nbN;i++){
+      const o=nb[i],x=o.pos[0]-rec.pos[0],z=o.pos[2]-rec.pos[2],r=rec.half+o.half+AV.margin;
+      collisionX[i]=x;collisionZ[i]=z;collisionC[i]=x*x+z*z-r*r;collisionVX[i]=o.vel[0];collisionVZ[i]=o.vel[1];
+    }
     const claims = ctx.claims?.bodyAt;
     if (!nbN && !claims && !ctx.walk?.stand) return STRAIGHT;
     const la = Math.max(0.45, v * 0.45), base = Math.atan2(dx, dz), bs = Math.sin(base), bc = Math.cos(base);
     // the way ahead clear of everyone for the horizon (most of the time, in most places): straight on, nothing more to weigh
     // (straying from the wanted velocity is nothing here, so the cost is the penalty alone)
-    if (standAt(rec, rec.pos[0] + bs * la, rec.pos[2] + bc * la) != null && clearance(rec, bs * la, bc * la) === 1 && penalty(tminOf(rec, bs * v, bc * v)) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return STRAIGHT;
+    if (standAt(rec, rec.pos[0] + bs * la, rec.pos[2] + bc * la) != null && candidateClearance( bs * la, bc * la) === 1 && penalty(tminOf(rec, bs * v, bc * v)) === 0 && !(claims && blocked(rec, claims, bs * la, bc * la))) return STRAIGHT;
     let have = false, bestTurn = 0, bestPace = 0, bestCost = 0;
     // A squeeze still respects remembered bodies, but accepts a closer approach to others.
     // Wider turns and a consistent side let a bumped walker escape instead of stopping forever.
@@ -340,7 +397,11 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
         const ex = sh * s - bs, ez = ch * s - bc;
         if (have && Math.sqrt(ex * ex + ez * ez) * (1 - 1e-12) >= bestCost) continue;
         const sideCost = rec.contacts.size && rec.recovery && a * (rec.recovery.x * bc - rec.recovery.z * bs) < 0 ? 0.8 : 0;
-        const stray = Math.hypot(ex, ez), cost = stray + sideCost + 4 * (1 - clearance(rec, sh * la * s, ch * la * s)) + anticipation * penalty(tminOf(rec, sh * v * s, ch * v * s));
+        const stray=Math.hypot(ex,ez),baseCost=stray+sideCost+4*(1-candidateClearance(sh*la*s,ch*la*s));
+        // Collision penalties are nonnegative: this candidate cannot improve
+        // the winner, so do not repeat its neighbour prediction.
+        if(have&&baseCost>=bestCost)continue;
+        const cost=baseCost+anticipation*penalty(tminOf(rec,sh*v*s,ch*v*s));
         if (have && cost >= bestCost) continue;
         const x = rec.pos[0] + sh * la * s, z = rec.pos[2] + ch * la * s;
         if (claims && blocked(rec, claims, sh * la * s, ch * la * s)) continue;
@@ -359,10 +420,14 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   // four seconds and cannot close through its clearance, even when squeezing or near a goal.
   function clearance(rec, dx, dz) {
     let scale = 1;
+    const reach=rec.contacts.size&&rec.walker?.bank?Math.hypot(dx,dz):null;
     for (const [id, c] of rec.contacts) {
       const o = people.get(id);
       if (!o || o.presence === "offscene" || o.floor !== rec.floor || c.until <= clock) { rec.contacts.delete(id); continue; }
-      const px = o.pos[0] - rec.pos[0], pz = o.pos[2] - rec.pos[2], dist = Math.hypot(px, pz);
+      const px = o.pos[0] - rec.pos[0], pz = o.pos[2] - rec.pos[2];
+      // A remembered body beyond the whole proposed displacement cannot limit it.
+      if(reach!==null&&px*px+pz*pz>(rec.half+o.half+.001+reach)**2)continue;
+      const dist=Math.hypot(px,pz);
       const closing = dx * px + dz * pz;
       // The tangent half-plane is conservative and cannot tunnel through the other body.
       if (closing > 0) scale = Math.min(scale, Math.max(0, dist - rec.half - o.half - 0.001) * dist / closing);
@@ -388,7 +453,10 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     // Cell membership was built before walking; keep ongoing contacts even across a cell edge.
     for (const key of touching) {
       const [ai, bi] = JSON.parse(key), a = people.get(ai), b = people.get(bi);
-      if (a && b && a.floor === b.floor && Math.hypot(a.pos[0] - b.pos[0], a.pos[2] - b.pos[2]) < a.half + b.half + 0.08) now.add(key);
+      if (a && b && a.floor === b.floor) {
+        if(Math.hypot(a.pos[0]-b.pos[0],a.pos[2]-b.pos[2])<a.half+b.half+.08)now.add(key);
+        else if(a.walker?.bank||b.walker?.bank){const ac=a.contacts.get(b.id),bc=b.contacts.get(a.id);if(ac)ac.until=clock+4.05;if(bc)bc.until=clock+4.05;}
+      }
     }
     for (let c = 0; c < cells.length; c++) {
       const cell = cells[c], a0 = cell[0], ci = Math.floor(a0.pos[0] / AV.cell), cj = Math.floor(a0.pos[2] / AV.cell);
@@ -405,7 +473,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if (a.floor !== b.floor) return;
     const dx = b.pos[0] - a.pos[0], dz = b.pos[2] - a.pos[2], r = a.half + b.half;
     if (dx * dx + dz * dz >= (r + 0.08) * (r + 0.08)) return;
-    const d = Math.hypot(dx, dz), key = JSON.stringify(a.id < b.id ? [a.id, b.id] : [b.id, a.id]), was = touching.has(key);
+    const d = Math.hypot(dx, dz), key = JSON.stringify(a.id < b.id ? [a.id, b.id] : [b.id, a.id]), was = touching.has(key)||((a.walker?.bank||b.walker?.bank)&&now.has(key));
     if (d >= r + (was ? 0.08 : 0)) return;                                    // a contact lasts until they're clear of it
     now.add(key);
     if (!was) {
@@ -440,6 +508,14 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   }
 
   // Walking: along the route at the person's own speed; the phase advances only while walking, at their own cadence.
+  // Render-only distance lets each retained cycle use its own stride without
+  // making navigation or persisted phase depend on draw timing/bake budgets.
+  // In-place walking accumulates the same virtual distance; separation does not.
+  function advanceWalk(rec, cycles) {
+    rec.phase = (rec.phase + cycles) % 1;
+    rec.walkDistance += cycles * (rec.walker?.stride ?? rec.speed / rec.rate);
+  }
+
   function step(rec, dt, live = false) {
     const d = rec.doing;
     if (live && rec.recovery?.until > clock) {
@@ -449,8 +525,9 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       return;
     }
     if (!d || d.verb !== "goTo" || d.planning) return;
-    if (d.opts?.inPlace) { rec.phase = (rec.phase + rec.rate * (d.opts.pace ?? 1) * dt) % 1; return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
-    const pace = Math.min(1, d.opts?.pace ?? 1), v = rec.speed * pace;
+    if(rec.walker?.bank&&(d.opts?.pace??1)<=0)return;
+    if (d.opts?.inPlace) { advanceWalk(rec, rec.rate * (rec.walker?.bank ? 1 : (d.opts.pace ?? 1)) * dt); return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
+    const pace = rec.walker?.bank ? 1 : Math.min(1, d.opts?.pace ?? 1), v = rec.speed * pace;
     let left = live ? Math.min(v * dt, rec.moveLeft) : v * dt;
     let startLeft = left;
     const last = d.leg === d.route.length - 1;
@@ -473,7 +550,11 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if (live && rec.touching > clock && d.leg < d.route.length - 1 && rest < rec.half + 0.35) { d.leg++; rec.offRoute = true; }
     if ((!squeezing || rec.contacts.size) && live && avoid && d.leg < d.route.length && (!(last && rest < 1.2) || rec.contacts.size)) {
       const p = d.route[d.leg], dx = p[0] - rec.pos[0], dz = p[2] - rec.pos[2];
-      const fresh = rec.contacts.size > 0 || rec.aside === undefined || (frameNo + Math.floor(rec.rank * 4)) % 4 === 0;
+      // Remembered contacts are still clipped geometrically on every step.
+      // Re-score their headings at 7.5 Hz for the faster pace bank; stagger
+      // people so the extra contacts at higher speeds do not bunch CPU work.
+      const interval=rec.contacts.size?(rec.walker?.bank?8:1):4;
+      const fresh=rec.aside===undefined||(frameNo+Math.floor(rec.rank*interval))%interval===0;
       const dec = fresh ? choose(rec, dx, dz, v, left) : rec.aside;
       rec.aside = dec;
       if (dec === null) {                                                     // blocked: stand, feet still
@@ -492,7 +573,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
         const y = standAt(rec, x, z);
         if (y == null) { rec.aside = undefined; return; }                    // the kept decision ran out of floor
         rec.heading = h; rec.pos[0] = x; rec.pos[1] = y; rec.pos[2] = z;
-        rec.phase = (rec.phase + rec.rate * pace * dt * (left / (v * dt))) % 1;
+        advanceWalk(rec, rec.rate * pace * dt * (left / (v * dt)));
         rec.offRoute = true; rec.lastGood = rec.pos.slice();
         hold(rec);
         return;
@@ -527,7 +608,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       }
     }
     // the feet move only while walking: the phase advances for the time actually walked
-    rec.phase = (rec.phase + rec.rate * pace * ((startLeft - left) / v)) % 1;
+    advanceWalk(rec, rec.rate * pace * ((startLeft - left) / v));
     const room = ctx.place?.roomAt?.(rec.pos, rec.floor);    // without a place to ask, a person stays in their room
     if (room != null) setRoom(rec, room);
     hold(rec);
@@ -569,11 +650,16 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
         const d = rec.doing; if (!d.route) continue;
         let len = 0, prev = rec.pos;
         for (let k = d.leg; k < d.route.length; k++) { len += Math.hypot(d.route[k][0] - prev[0], d.route[k][2] - prev[2]); prev = d.route[k]; }
-        heapPush({ time: clock + Math.max(0.25, len / (rec.speed * (d.opts?.pace ?? 1))), id: rec.id, token: e.token });
+        heapPush({ time: clock + Math.max(0.25, len / (rec.speed * (rec.walker?.bank ? 1 : (d.opts?.pace ?? 1)))), id: rec.id, token: e.token });
         continue;
       }
       catchUp(rec);
-      if (rec.doing?.token === e.token && rec.doing.route) { const end = rec.doing.route[rec.doing.route.length - 1]; rec.pos[0] = end[0]; rec.pos[2] = end[2]; rec.doing.leg = rec.doing.route.length; step(rec, 0); }
+      if(rec.walker?.bank&&rec.doing?.token===e.token&&rec.doing.route){
+        const d=rec.doing;let len=0,prev=rec.pos;
+        for(let k=d.leg;k<d.route.length;k++){len+=Math.hypot(d.route[k][0]-prev[0],d.route[k][2]-prev[2]);prev=d.route[k];}
+        heapPush({time:clock+Math.max(.25,len/rec.walker.maxSpeed),id:rec.id,token:e.token});
+      }
+      if (!rec.walker?.bank && rec.doing?.token === e.token && rec.doing.route) { const end = rec.doing.route[rec.doing.route.length - 1]; rec.pos[0] = end[0]; rec.pos[2] = end[2]; rec.doing.leg = rec.doing.route.length; step(rec, 0); }
     }
     const list = listOf();
     // who is where, for avoiding each other and bumping: everyone stepped this frame, on a 2 m grid
@@ -584,6 +670,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       const rec = list[i];
       if (rec.presence === "offscene") continue;
       rec.vel ??= [0, 0];
+      if(rec.lastClock>=clock-dt-1e-9)updatePace(rec,dt);
       rec.moveLeft = rec.speed * dt; rec.tickX = rec.pos[0]; rec.tickZ = rec.pos[2];
       const key = cellOf(rec.floor, rec.pos[0], rec.pos[2]);
       let cell = grid.get(key);
@@ -597,7 +684,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       out.visited++;
       if (rec.lastClock < clock - dt - 1e-9) catchUp(rec);                     // back from hidden: catch up at once
       if (rec.lastClock < clock) {
-        const x0 = rec.pos[0], z0 = rec.pos[2], h0 = rec.heading, span = clock - rec.lastClock;
+        const x0 = rec.pos[0], z0 = rec.pos[2], h0 = rec.heading, span = rec.walker?.bank&&Math.abs(clock-rec.lastClock-dt)<1e-9?dt:clock-rec.lastClock;
         const budget = rec.moveLeft;
         step(rec, span, true); rec.lastClock = clock;
         rec.moveLeft = Math.max(0, budget - Math.hypot(rec.pos[0] - x0, rec.pos[2] - z0));
@@ -654,11 +741,22 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const d = rec.doing;
     return {
       at: { pos: rec.pos.slice(), floor: rec.floor, room: rec.room }, heading: rec.heading, phase: rec.phase,
+      ...(rec.paceState ? {paceState:{...rec.paceState}} : {}),
       doing: d ? { verb: d.verb, target: d.target, opts: d.opts } : null, holding: rec.holding, presence: rec.presence,
     };
   }
 
   return {
+    // Diagnostic control: retain the pace bank and navigation, select Neutral's
+    // retargeted capture speed for every body (including children).
+    setSamePace(value) {
+      env.samePace = !!value;
+      for (const rec of people.values()) if (rec._walker?.bank) {
+        const w = rec._walker; w.samePace = env.samePace;
+        setWalkSpeed(w, desiredSpeed(w, rec.paceState?.time ?? 0, rec.doing?.opts?.urgency));
+        if (rec.paceState) Object.assign(rec.paceState, {speed:w.v, tripStart:w.v});
+      }
+    },
     dispose() {
       for (const rec of people.values()) { rec.doing = null; remove(rec.id); }
       rooms.clear(); grid.clear(); cells.length = 0;
