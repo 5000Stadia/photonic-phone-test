@@ -77,3 +77,38 @@ walks, runs, Old, Skip and BigSteps are not redistributed by this change.
   pelvis sway and height scaled by standing hip height, and baked per person. Walk-to-stand and
   stand-to-walk are short blends between captured poses (`src/people/motion.js`), not captured clips.
   These derivatives retain the attribution and CC BY 4.0 obligations above.
+
+## Photonic captured moves (neutral-moves-v1)
+
+A start from standing, a stop out of the walk, and the about-turn before sitting, each cut to exactly the
+frames that play (`src/people/moves.js`). Every second frame kept (30 fps), `Frames` and `Frame Time` updated
+(0.033334), numbers rounded to four decimals; hierarchy unchanged. Frame numbers are 0-based, counting from the
+first line after `Frame Time`.
+
+- **What:** `Neutral_start.bvh`, 66 frames (2.17 s), from `100STYLE/Neutral/Neutral_ID.bvh` (Neutral style,
+  idle), original file frames **1714 to 1844** inclusive: the actor standing, then setting off (the weight onto
+  the right foot, the left foot first) into the walk. Outside the dataset's published idle cut for Neutral
+  (`Frame_Cuts.csv`: ID 655–1555), where the take's end walks off.
+- **What:** `Neutral_stop.bvh`, 53 frames (1.73 s), from `100STYLE/Neutral/Neutral_FW.bvh` (forward walk),
+  original file frames **5820 to 5924** inclusive: the walk, two shortening steps, the feet closing; a stop in
+  the middle of the trial (the stops at the ends of the idle take carry gestures: the head down, a hand forward).
+- **What:** `Neutral_turn.bvh`, 77 frames (2.53 s), from `100STYLE/Neutral/Neutral_ID.bvh`, original file
+  frames **128 to 280** inclusive: the walk in, slowing, an about-turn of 188 degrees on two pivot steps, two
+  settling steps, standing facing back. Outside the published idle cut, at the take's start.
+- **Source:** 100STYLE.zip, Zenodo record 8127870, https://doi.org/10.5281/zenodo.8127870, the members above as
+  supplied by the lead (byte-range retrieval, 2026-10-15/16). Before cutting, each whole member was checked as
+  text: a `HIERARCHY` block of `ROOT/JOINT/OFFSET/CHANNELS/End Site` lines and a motion block of numbers only.
+  Nothing downloaded was executed. The dataset's turn takes (`Neutral_TR1`..) were looked at and not used: they
+  turn between gaits without stopping.
+- **Licence and attribution:** CC BY 4.0 International; Ian Mason, Sebastian Starke and Taku Komura; paper and
+  licence text as credited above.
+- **Runtime derivatives** (`src/people/moves.js`): retargeted onto each body as the walk is (the idle loop's mean
+  pose as the shared reference; pelvis height scaled by hip height); mirrored left for right where the other foot
+  or the other way round is needed; the travel re-laid so the move ends where it is sent (the distance scaled, 0.6
+  to 1.45 of the capture over the last steps, with a few centimetres spread over them; a turn added or taken away:
+  a start turned toward its way, a stop or the about-turn ended facing a seat), the planted feet held by leg IK
+  where they land (a foot turned past 25 degrees pivots on its ball); the arms replaced by the idle loop's where the actor folds
+  his (before the start, after the turn); blended with the walk cycle over a quarter second where they meet. These
+  derivatives retain the attribution and CC BY 4.0 obligations above.
+
+The three trims add **118,505 bytes uncompressed**.

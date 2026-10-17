@@ -2,6 +2,9 @@ import {seatPlace,armsOf} from './seats.js';
 import {loadSitting,makeSitting} from './sitting.js';
 import {desiredSpeed,setWalkSpeed} from './pace-walk.js';
 import {WALK_EASE,walkEaseAt,walkedBy} from './motion.js';
+import {loadMoves,movesReady,makeMove,moveShape,movePath,MOVE_DEFS} from './moves.js';
+import {PACE_FRAMES} from './walk.js';
+import {makeIdleWalker} from './mocap.js';
 // The population's data layer (R4; design/r4-plan.md): the people store, ranks, tiers, walking, presence, rooms, state,
 // events and hit, in pure JS with no three.js, so node tests it. draw.js reads what tick() returns; index.js wires the
 // two into makePeople (design/interface.md).
@@ -31,6 +34,7 @@ class Person {
     this.id = f.id; this.doc = f.doc; this.seed = f.seed; this.res = f.res; this.values = f.res.values; this.rank = f.rank;
     this.pos = f.pos; this.floor = f.floor; this.room = f.room; this.heading = f.heading; this.phase = f.phase;
     this.sitting = null; this.sitMotion = null; this.sitToken = 0; this.afterStand = null;
+    this.move = null; this.feet = null; this.moveWish = null;      // a captured move under way (moves.js), where a standing person's feet are, a stop or goTo waiting on a move
     this.doing = null; this.holding = f.holding; this.presence = f.presence; this.tier = null; this.seen = false;
     this.height = f.height; this.lastClock = f.lastClock; this.goToken = 0; this.half = Math.max(0.18, 0.13 * f.height);
     this.reviewBody = 0;         // the review page's body (draw.js makeDraw `review`): 0 as worn, 1 nude, 2 the undergarments; never set in the crowd
@@ -134,12 +138,14 @@ const DEFAULT_THRESHOLDS = { near: 4, mid: 14 };   // metres for a person of mid
  * @param opts.avoid       false: walkers ignore each other (ghosts; the tests' baseline)
  * @param opts.outfits     (id, values) -> an outfit (garments/outfit.js) or null for the base layer only; false: nobody is dressed. Default: outfits.js's placeholder rule
  */
-export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = true, exactArms = false, easeWalks = false, outfits = outfitFor } = {}) {
-  const env = { outfits, basis, walk, samePace, exactArms, easeWalks };
+export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = DEFAULT_THRESHOLDS, hysteresis = 0.1, planBudget = 4000, avoid = true, samePace = true, exactArms = false, easeWalks = false, moves = false, outfits = outfitFor } = {}) {
+  const env = { outfits, basis, walk, samePace, exactArms, easeWalks, moves };
   const people = new Map();            // id -> record
   const rooms = new Map();             // room id -> Set of ids
   let shown = null;                    // null: every room shown
   let queue = [];                      // events since the last events()
+  // (moves: captured starts, stops and the turn before a sit, moves.js; off by default: the crowd keeps its blended hand-overs, its digests pinned to them)
+  if (moves) loadMoves().catch((e) => queue.push({ type: "moves_error", reason: e.message }));
   // Time: the population's own clock (the sum of tick dts). People nobody sees are not stepped each frame; they catch
   // up when next looked at, and their arrivals come from a queue of arrival times, so a walk into a hidden room still
   // ends, on time, at a cost per arrival rather than per frame.
@@ -231,6 +237,11 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const sitting=rec.sitting;
     rec.sitting=null;
     const atSeat=Math.hypot(rec.pos[0]-target.pos[0],rec.pos[2]-target.pos[2])<.05 && rec.floor===target.floor;
+    // with captured moves: the walk goes straight in to where the turn (or, arriving already nearly facing the seat's way, the stop) begins, and on a
+    // little past it; the move begins on the way and ends on the sit-down's first place (sitPlan)
+    const plan=!atSeat && movesOn(rec) && !rec.move ? sitPlan(rec,[target.pos[0],target.pos[2]],h) : null;
+    if(plan){sitting.plan=plan;const g=[plan.S[0]+.6*Math.sin(plan.h),target.pos[1],plan.S[1]+.6*Math.cos(plan.h)];
+      const ok=goTo(id,{pos:g,floor:place.floor},{pace:opts.pace??1});rec.sitting=sitting;if(!ok){rec.sitting=null;rec.sitMotion=null;return false;}return true;}
     const ok=atSeat ? (rec.doing=null,++rec.goToken,true) : goTo(id,target,{pace:opts.pace??1});
     rec.sitting=sitting;
     if(!ok){rec.sitting=null;rec.sitMotion=null;return false;}
@@ -263,8 +274,10 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       s.time-=m.durations[s.segment];
       if(s.segment==='sitDown')s.segment=s.standRequested?'standUp':'seated';
       else if(s.segment==='standUp') {
-        const p=m.pose(m.spec.segments.standUp[1]).P[0],h=s.seat.facing;
+        const P=m.pose(m.spec.segments.standUp[1]).P,p=P[0],h=s.seat.facing;
         rec.pos[0]+=Math.cos(h)*p[0]+Math.sin(h)*p[2];rec.pos[2]+=-Math.sin(h)*p[0]+Math.cos(h)*p[2];
+        // (where the rise left the balls, about the pelvis: a captured start sets off from them, as the draw's idle stands on them)
+        if(env.moves)rec.feet=[16,20].map(b=>[P[b][0]-p[0],P[b][2]-p[2]]);
         rec.sitting=null;rec.sitMotion=null;rec.doing=null;hold(rec);
         queue.push({type:'stood',id:rec.id,seat:s.seat.id});
         if(rec.afterStand){const next=rec.afterStand;rec.afterStand=null;rec.lastClock=clock;goTo(rec.id,next.target,next.opts);}
@@ -326,10 +339,25 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     const to = posOf(target); if (!to) return false;
     // babies don't walk: carried on a hip or in arms (carry.carrier, a later milestone), so goTo says so instead
     if (rec.values.age < 0.9) { queue.push({ type: "cannot_walk", id: rec.id, reason: "a baby is carried, not walked" }); return false; }
+    // with captured moves (env.moves): a goTo while a move plays waits for its end; one to where a walker already is, is a stop (on at their pace until the
+    // walk meets the stop's capture, then the stop: a person walking cannot stand still on the spot); one from standing begins with the captured start
+    const walking = rec.doing?.verb === "goTo" && !rec.doing.planning && !rec.doing.opts?.inPlace;
+    if (movesOn(rec)) {
+      if (rec.move) { rec.moveWish = { goTo: [target, opts] }; return true; }
+      rec.moveWish = null;
+      // (a goal just ahead, nearer than a stop can come due and fit: the stop, landing on it as near as its steps allow)
+      const dx = to[0] - rec.pos[0], dz = to[2] - rec.pos[2], near = Math.hypot(dx, dz), ahead = dx * Math.sin(rec.heading) + dz * Math.cos(rec.heading);
+      const straight = ahead > 0.05 && Math.abs(dx * Math.cos(rec.heading) - dz * Math.sin(rec.heading)) < 0.15;
+      if (walking && !opts.inPlace && (near < 0.4 || (near < 1.2 * rec.height / 1.78 && straight))) {
+        const h = rec.heading; rec.moveWish = { stop: true, goal: straight ? [to[0], to[2]] : null };
+        rec.doing.route = [[rec.pos[0] + 4 * Math.sin(h), rec.pos[1], rec.pos[2] + 4 * Math.cos(h)]]; rec.doing.leg = 0;
+        return true;
+      }
+    }
     const r = ctx.walk?.route ? ctx.walk.route(rec.pos, to, rec.floor, rec.half) : [to];   // routes fit this body
     if(rec.walker?.bank) {const p=rec.paceState??={time:0,speed:rec.speed};p.tripTime=0;p.tripStart=rec.speed;}
     const token = ++rec.goToken, walkT = rec.doing?.verb === "goTo" ? rec.doing.walkT ?? 0 : 0;
-    rec.doing = { verb: "goTo", target, opts, route: null, leg: 0, token, planning: true, walkT };
+    rec.doing = { verb: "goTo", target, opts, route: null, leg: 0, token, planning: true, walkT, start: !walking && !opts.inPlace, started: false };
     if (r && typeof r.then === "function") { r.then(route => { if (rec.doing?.token === token) setRoute(rec, route); }, () => { if (rec.doing?.token === token) setRoute(rec, null); }); return true; }
     if (r && typeof r.step === "function") { planners.push({ rec, token, stepper: r }); return true; }
     return setRoute(rec, r);
@@ -626,7 +654,212 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     return Math.min(start, walkEaseAt(Infinity, rest));
   }
 
+  // ---- captured moves (moves.js; env.moves): a start from standing, a stop at the end of a walk, the turn before a sit ---------------------------------
+  // The population keeps where the person is: through a move, their place and facing follow its path (move.traj) from where it began, and the draw plays its
+  // poses about that path. A walk meets a move at the phase where its capture walks the same (MOVE_DEFS entryPhase; mirrored, half a cycle on), so a stop
+  // can only begin at one of two places a cycle (the feet land where they land): of the coming chances, the one that changes the capture least to end on
+  // the goal, its last steps scaled (movePath: the end is linear in the scales) and what is left spread over them; a start picks its first foot and its
+  // first steps so that the move after it comes due needing neither (startPlan). The poses are made as the move begins: 6 to 20 ms on a desktop, 15 to 35
+  // with the arms' keep-out of a dressed person (out.moveMs).
+  // (a move's poses fill whole slots of the draw's walk texture, 65 a slot: a slot to every 2 s gives 37 to 59 poses a second, the GPU blending between)
+  const MOVE_K = [0.6, 1.45], MOVE_SLOT = 2;
+  let moveMs = 0;                                      // the time this tick spent making moves' poses (tick's out.moveMs: the host's ledger counts it as baking)
+  const movesOn = (rec) => !!env.moves && movesReady() && !!rec.walker?.mocap;
+  const wrapPi = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+  function beginMove(rec, kind, opts, after, t0 = 0) {
+    const w = rec.walker, S = moveShape(w, kind, !!opts.mirror), slots = Math.max(1, Math.ceil(S.duration / MOVE_SLOT - 1e-9));
+    // into a sit-down: its last steps leave the balls where the sit-down's first pose has them (no slide as one hands to the other)
+    if (after === "sit" && rec.sitting && rec.sitMotion) {
+      const sm = rec.sitMotion, P = sm.pose(sm.spec.segments.sitDown[0]).P, f = rec.sitting.seat.facing, cf = Math.cos(f), sf = Math.sin(f), c = Math.cos(rec.heading), sn = Math.sin(rec.heading);
+      opts = { ...opts, endFeet: [16, 20].map((b) => { const dx = rec.sitting.contact[0] + cf * P[b][0] + sf * P[b][2] - rec.pos[0], dz = rec.sitting.contact[1] - sf * P[b][0] + cf * P[b][2] - rec.pos[2]; return [dx * c - dz * sn, dx * sn + dz * c]; }) };
+    }
+    // (the arms kept out of their clothes as their walk and idle keep them: keepout.js)
+    const from = performance.now(), move = makeMove(w, kind, { ...opts, keepout: rec.dressing?.keepout ?? null, frames: slots * PACE_FRAMES + 1 });
+    moveMs += performance.now() - from;
+    if (kind === "start") move.end.walk = walkAfterStart(rec, move);
+    const fit = { mirror: !!opts.mirror, scaleIn: opts.scaleIn ?? 1, scaleOut: opts.scaleOut ?? opts.scaleIn ?? 1, warp: opts.warp ?? 0, shift: opts.shift ?? null };
+    rec.move = { kind, move, slots, t: 0, p0: rec.pos.slice(), h0: rec.heading, after, fit, token: (rec.moveToken = (rec.moveToken ?? 0) + 1) };
+    rec.feet = null;
+    stepMove(rec, t0);
+  }
+  // the walk after a start: its pose at the move's last phase, placed so its planted ball is where the move left it (the draw blends the move into it)
+  function walkAfterStart(rec, move) {
+    const w = rec.walker, side = move.mirror ? 1 : 0, phi = (MOVE_DEFS.start.exitPhase + (move.mirror ? 0.5 : 0)) % 1, b = (side ? 20 : 16) * 3, last = move.frames[move.n - 1];
+    const lock = move.stances[side].at(-1), ball = lock && lock.b >= move.n - 3 ? lock.anchor : [last.P[b], last.P[b + 2]];
+    const phase = (((phi - (w.phaseOffset ?? 0)) % 1) + 1) % 1;
+    w.pose(w, phase);
+    const bx = w.Pm[b], bz = w.Pm[b + 2], yaw = move.end.yaw, c = Math.cos(yaw), sn = Math.sin(yaw);
+    return { x: ball[0] - (c * bx + sn * bz), z: ball[1] - (-sn * bx + c * bz), yaw, phase };
+  }
+  // where the walk has its planted ball as a stop or turn begins (the walk's toe lock, mid-stance: mocap.js poseMocap), in the frame of that moment
+  function walkAnchor(rec, mirror, phiEntry) {
+    const w = rec.walker, side = mirror ? 1 : 0, phiLock = (0.3 + (mirror ? 0.5 : 0)) % 1, ahead = (((phiLock - phiEntry) % 1) + 1) % 1, b = (side ? 20 : 16) * 3;
+    w.pose(w, phiLock - (w.phaseOffset ?? 0));
+    return [side, w.Pm[b], w.Pm[b + 2] + ahead * w.stride];
+  }
+  function stepMove(rec, dt) {
+    const mv = rec.move, m = mv.move;
+    mv.t += dt;
+    const t = Math.min(mv.t, m.duration), [x, z, y] = m.traj(t), c = Math.cos(mv.h0), sn = Math.sin(mv.h0);
+    rec.pos[0] = mv.p0[0] + c * x + sn * z; rec.pos[2] = mv.p0[2] - sn * x + c * z; rec.heading = mv.h0 + y;
+    const room = ctx.place?.roomAt?.(rec.pos, rec.floor); if (room != null) setRoom(rec, room);
+    hold(rec);
+    if (mv.t < m.duration) return;
+    const over = mv.t - m.duration;
+    rec.move = null;
+    if (mv.kind === "start") {
+      // on into the walk: placed where the walk's own pose at the last phase meets the move's (walkAfterStart), on along the route
+      const e = m.end.walk;
+      rec.pos[0] = mv.p0[0] + c * e.x + sn * e.z; rec.pos[2] = mv.p0[2] - sn * e.x + c * e.z; rec.heading = mv.h0 + e.yaw; rec.phase = e.phase;
+      if (rec.doing?.verb === "goTo") rec.doing.started = true;
+      if (rec.moveWish?.goTo) { const [g, o] = rec.moveWish.goTo; rec.moveWish = null; goTo(rec.id, g, o); return; }
+      if (over > 0) step(rec, over);
+      return;
+    }
+    // standing where it ended, the feet where its last steps left them (in the person's frame there: the idle's, draw.js)
+    const e = m.end, ce = Math.cos(e.yaw), se = Math.sin(e.yaw);
+    rec.feet = e.feet.map(([fx, fz]) => { const dx = fx - e.x, dz = fz - e.z; return [ce * dx - se * dz, se * dx + ce * dz]; });
+    if (mv.after === "sit" && rec.sitting) {
+      // into the captured sit-down, in the seat's frame (stepSit's turn, which a move replaces)
+      const s = rec.sitting; s.segment = "sitDown"; s.time = over; rec.heading = s.seat.facing;
+      rec.pos[0] = s.contact[0]; rec.pos[2] = s.contact[1]; rec.floor = s.floor; setRoom(rec, roomOf(rec.pos, rec.floor)); hold(rec); rec.doing = { verb: "sit" };
+      return;
+    }
+    rec.doing = null;
+    queue.push({ type: "arrived", id: rec.id, at: { pos: rec.pos.slice(), floor: rec.floor, room: rec.room } });
+    if (rec.moveWish?.goTo) { const [g, o] = rec.moveWish.goTo; rec.moveWish = null; goTo(rec.id, g, o); }
+  }
+  // what the walk's end asks of a move: a stop on the goal (the route's end), a stop now (rec.moveWish.stop), or the move a sit planned (rec.sitting.plan:
+  // a turn or a stop ending on the sit-down's first place, facing the seat's way). { kind, goal: [x, z] | null, mirrors, warp(heading, mirror) }
+  function moveGoal(rec, d) {
+    const plan = rec.sitting?.segment === "approach" ? rec.sitting.plan : null;
+    if (plan) return { kind: plan.kind, goal: plan.T, mirrors: plan.kind === "stop" ? [false, true] : [plan.mirror], warp: (h, mirror) => (wrapPi(plan.facing - h - movePath(rec.walker, plan.kind, { mirror }).yaw) * 180) / Math.PI, after: "sit" };
+    const straight = (h, mirror) => (-movePath(rec.walker, "stop", { mirror }).yaw * 180) / Math.PI;
+    if (rec.moveWish?.stop) return { kind: "stop", goal: rec.moveWish.goal ?? null, mirrors: [false, true], warp: straight };
+    if (d.leg !== d.route.length - 1) return null;
+    const p = d.route[d.leg];
+    return { kind: "stop", goal: [p[0], p[2]], mirrors: [false, true], warp: straight };
+  }
+  // whether a move begins within the next `dist` metres of this walk: { kind, at (metres from here), opts, after } or null. Each coming chance (each allowed
+  // mirror's next entry phase, and the one a cycle on) is fitted to the goal: the last steps scaled to end level with it (scaleOut, within MOVE_K), what that
+  // leaves (aside, or past the scale's limit) spread over the same steps (shift). The chance taken is the one that changes the capture least.
+  function moveDue(rec, d, dist) {
+    const g = moveGoal(rec, d); if (!g) return null;
+    // (not while a walk from standing is still under the draw's blend into it: the move would begin from a walk not yet walking)
+    if (d.blendFrom !== undefined && clock - d.blendFrom < 0.5) return null;
+    // the way this tick walks: toward the waypoint (a walk from standing faces it only as it sets off)
+    const p = d.route[d.leg], h = p ? Math.atan2(p[0] - rec.pos[0], p[2] - rec.pos[2]) : rec.heading;
+    const w = rec.walker, phi = (((rec.phase + (w.phaseOffset ?? 0)) % 1) + 1) % 1, fx = Math.sin(h), fz = Math.cos(h);
+    const chances = [];
+    for (const mirror of g.mirrors) {
+      const phiO = (MOVE_DEFS[g.kind].entryPhase + (mirror ? 0.5 : 0)) % 1, ahead = (((phiO - phi) % 1) + 1) % 1, warp = g.warp(h, mirror), P = movePath(w, g.kind, { mirror, warp }), kIn = w.v / P.speed;
+      for (const cycles of [ahead, ahead + 1]) {
+        const at = cycles * w.stride;
+        let kOut = 1, shift = null, cost = 0;
+        if (g.goal) {
+          // the goal from where this chance begins, in the move's frame (x their left, z ahead); its end there is kIn walk + kOut rest + shift
+          const gx = g.goal[0] - rec.pos[0] - at * fx, gz = g.goal[1] - rec.pos[2] - at * fz, Rx = gx * fz - gz * fx, Rz = gx * fx + gz * fz;
+          kOut = Math.max(MOVE_K[0], Math.min(MOVE_K[1], (Rz - kIn * P.walk[1]) / (Math.abs(P.rest[1]) > 1e-6 ? P.rest[1] : 1e-6)));
+          shift = [Rx - kIn * P.walk[0] - kOut * P.rest[0], Rz - kIn * P.walk[1] - kOut * P.rest[1]];
+          // (at most half the way those steps go: a goal too near for the move at all is overshot, not walked back to)
+          const len = Math.hypot(shift[0], shift[1]), most = 0.5 * kOut * Math.hypot(P.rest[0], P.rest[1]);
+          cost = Math.abs(kOut - 1) * Math.hypot(P.rest[0], P.rest[1]) + len;
+          if (len > most) shift = [(shift[0] * most) / len, (shift[1] * most) / len];
+        }
+        chances.push({ mirror, at, kIn, kOut, warp, shift, cost });
+      }
+    }
+    chances.sort((a, b) => a.at - b.at);
+    const first = chances[0];
+    if (!first || first.at > dist + 1e-9) return null;
+    // a later chance that changes the capture less: walk on to it
+    if (g.goal && chances.some((c) => c !== first && c.cost < first.cost - 1e-6)) return null;
+    const anchor = walkAnchor(rec, first.mirror, (MOVE_DEFS[g.kind].entryPhase + (first.mirror ? 0.5 : 0)) % 1);
+    return { kind: g.kind, at: first.at, after: g.after ?? null, opts: { mirror: first.mirror, scaleIn: first.kIn, scaleOut: first.kOut, warp: first.warp, shift: first.shift, entry: { anchor } } };
+  }
+  // A start from standing, toward the route's first waypoint (its turn, if they face elsewhere, taken over its first steps). Its walking steps are at the
+  // walk's pace (scaleIn); its first steps (scaleOut, from 0.7 to 1.35 of that) and its first foot (mirror) are chosen so that the move after it (a sit's
+  // turn, or the stop at the end of a straight route) comes due where it needs no scaling: the walk between them whole cycles from the start's last phase
+  // to that move's entry. Null when the route has no room for the start and what follows it (the walk then starts as before, from the draw's blend).
+  function startPlan(rec, d) {
+    const w = rec.walker, p = d.route[d.leg], h = Math.atan2(p[0] - rec.pos[0], p[2] - rec.pos[2]), warp = (wrapPi(h - rec.heading) * 180) / Math.PI;
+    const k = w.v / moveShape(w, "start").speed, c = Math.cos(rec.heading), sn = Math.sin(rec.heading);
+    const local = ([x, z]) => { const dx = x - rec.pos[0], dz = z - rec.pos[2]; return [dx * c - dz * sn, dx * sn + dz * c]; };
+    // where the next move begins at its own scales, and the phase it begins at: a sit's turn (or stop) at the plan's S; a stop ending on the route's end
+    const plan = rec.sitting?.segment === "approach" ? rec.sitting.plan : null, next = [];
+    if (plan) next.push({ at: local(plan.S), phase: (MOVE_DEFS[plan.kind].entryPhase + (plan.mirror ? 0.5 : 0)) % 1, rest: Math.hypot(...movePath(w, plan.kind, plan).rest) });
+    else if (d.leg === d.route.length - 1) for (const mirror of [false, true]) {
+      const P = movePath(w, "stop", { mirror, warp: (-movePath(w, "stop", { mirror }).yaw * 180) / Math.PI }), kIn = w.v / P.speed, L = kIn * P.walk[1] + P.rest[1];
+      next.push({ at: local([p[0] - L * Math.sin(h), p[2] - L * Math.cos(h)]), phase: (MOVE_DEFS.stop.entryPhase + (mirror ? 0.5 : 0)) % 1, rest: Math.hypot(...P.rest) });
+    }
+    let best = null;
+    for (const mirror of [false, true]) {
+      const P = movePath(w, "start", { mirror, warp }), phiE = (MOVE_DEFS.start.exitPhase + (mirror ? 0.5 : 0)) % 1;
+      for (let kOut = 0.7 * k; kOut <= 1.35 * k + 1e-9; kOut += 0.01 * k) {
+        const ex = k * P.walk[0] + kOut * P.rest[0], ez = k * P.walk[1] + kOut * P.rest[1];
+        if (!next.length) {
+          // a route of corners: the start at its own scale, if the route has room for it and a stop
+          if (!mirror && Math.abs(kOut - k) < 0.005 * k && routeLeft(rec, d) > Math.hypot(ex, ez) + 0.5 * w.stride + 0.7) best = { mirror: false, kOut: k, cost: 0 };
+          continue;
+        }
+        for (const nb of next) {
+          // the walk from the start's end to where the next move begins: ahead of it, and the phase it reaches there that move's entry
+          const dx = nb.at[0] - ex, dz = nb.at[1] - ez, dist = Math.hypot(dx, dz);
+          if (dx * Math.sin(P.yaw) + dz * Math.cos(P.yaw) < 0.25 * w.stride) continue;
+          // (what is left for the next move's own steps to take up: the two scalings shared, each against its steps' length)
+          const want = (((nb.phase - phiE) % 1) + 1) % 1, cyc = dist / w.stride - want, err = Math.abs(cyc - Math.round(cyc)) * w.stride;
+          const cost = (kOut / k - 1) ** 2 + (err / nb.rest) ** 2;
+          if (!best || cost < best.cost) best = { mirror, kOut, cost };
+        }
+      }
+    }
+    if (!best) return null;
+    // its turn so that it ends facing the waypoint from where it ends (not from where it began: the walk on from it would turn on the spot)
+    let wp = warp;
+    for (let i = 0; i < 3; i++) {
+      const P = movePath(w, "start", { mirror: best.mirror, warp: wp }), ex = k * P.walk[0] + best.kOut * P.rest[0], ez = k * P.walk[1] + best.kOut * P.rest[1];
+      const x = rec.pos[0] + c * ex + sn * ez, z = rec.pos[2] - sn * ex + c * ez, h1 = Math.atan2(p[0] - x, p[2] - z);
+      wp += (wrapPi(h1 - rec.heading - P.yaw) * 180) / Math.PI;
+    }
+    return { mirror: best.mirror, scaleIn: k, scaleOut: best.kOut, warp: wp, feet: feetOf(rec) };
+  }
+  // where a standing person's balls are, in their frame: where the last stop or rise left them, or the idle's own stance (as the draw stands them:
+  // draw.js idlerOf, bakeIdle)
+  function feetOf(rec) {
+    if (rec.feet) return rec.feet;
+    return (rec._homeFeet ??= makeIdleWalker(rec.far.J, { age: rec.bodyParams.age ?? rec.values.age, seed: rec.seed, build: rec.bodyParams.build }).homeFeet.map((f) => f.slice()));
+  }
+  // The approach to a seat with captured moves. The walk comes straight in, and the turn needed at its end (from the heading in to the seat's way) picks the
+  // move: from 110 degrees round, the captured about-turn (MOVE_DEFS turn; mirrored to turn the short way, its turn warped to end facing the seat's way:
+  // 188 degrees captured, so a turn of 110 is warped by 78; within 30 degrees of an about-face, whichever way is warped least); under that, arriving
+  // already nearly facing the seat's way (from behind it, or beside it), the captured stop, warped round the rest. S, where the move must begin (at its
+  // natural scales) to end on the sit-down's first place T: the heading in is the line to S, and S turns with it (a fixed point). Null when there is no
+  // room to walk into it (the turn on the spot, as before).
+  const TURN_FROM = (110 * Math.PI) / 180;
+  function sitPlan(rec, T, facing) {
+    const w = rec.walker, at = (h, kind, mirror) => {
+      const warp = (wrapPi(facing - h - movePath(w, kind, { mirror }).yaw) * 180) / Math.PI, P = movePath(w, kind, { mirror, warp }), kIn = w.v / P.speed;
+      const E = [kIn * P.walk[0] + P.rest[0], kIn * P.walk[1] + P.rest[1]], c = Math.cos(h), sn = Math.sin(h);
+      return { kind, mirror, T, facing, warp, h, S: [T[0] - (c * E[0] + sn * E[1]), T[1] - (-sn * E[0] + c * E[1])] };
+    };
+    // the heading in is the line from here to S, and S moves with it: the fixed point, found by halving the step (a few iterations), for a move and foot
+    const solve = (kind, mirror) => {
+      let h = Math.atan2(T[0] - rec.pos[0], T[1] - rec.pos[2]), plan = at(h, kind, mirror);
+      for (let i = 0; i < 16; i++) { const h2 = Math.atan2(plan.S[0] - rec.pos[0], plan.S[1] - rec.pos[2]), d = wrapPi(h2 - h); if (Math.abs(d) < 1e-4) break; h += 0.5 * d; plan = at(h, kind, mirror); }
+      return Math.hypot(plan.S[0] - rec.pos[0], plan.S[1] - rec.pos[2]) < 0.8 || Math.abs(wrapPi(Math.atan2(plan.S[0] - rec.pos[0], plan.S[1] - rec.pos[2]) - plan.h)) > 0.05 ? null : plan;
+    };
+    // the turn the short way round (near an about-face, either way: the one warped least), or under 110 degrees the stop
+    const D = wrapPi(facing - Math.atan2(T[0] - rec.pos[0], T[1] - rec.pos[2]));
+    const tries = Math.abs(D) < TURN_FROM ? [["stop", false]] : Math.abs(D) > (150 * Math.PI) / 180 ? [["turn", D > 0], ["turn", D <= 0]] : [["turn", D > 0]];
+    let best = null;
+    for (const [kind, mirror] of tries) { const plan = solve(kind, mirror); if (plan && (!best || Math.abs(plan.warp) < Math.abs(best.warp))) best = plan; }
+    return best;
+  }
+  // how long the route is from here (metres)
+  function routeLeft(rec, d) { let len = 0, prev = rec.pos; for (let k = d.leg; k < d.route.length; k++) { len += Math.hypot(d.route[k][0] - prev[0], d.route[k][2] - prev[2]); prev = d.route[k]; } return len; }
+
   function step(rec, dt, live = false) {
+    if (rec.move) { stepMove(rec, dt); return; }
     if(rec.sitting && stepSit(rec,dt))return;
     const d = rec.doing;
     if (live && rec.recovery?.until > clock) {
@@ -638,8 +871,14 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     if (!d || d.verb !== "goTo" || d.planning) return;
     if(rec.walker?.bank&&(d.opts?.pace??1)<=0)return;
     if (d.opts?.inPlace) { advanceWalk(rec, rec.rate * (rec.walker?.bank ? 1 : (d.opts.pace ?? 1)) * dt); return; }       // goTo(target, { inPlace: true }): the stride of a walk and none of its way (a lineup, a gait on show); they stay where they stand, facing as they were
+    const moving = movesOn(rec);
+    // a walk from standing begins with the captured start, when the way is long enough for it and a stop (else the draw's blend, as before)
+    if (moving && d.start && !d.started) { d.started = true; const sp = startPlan(rec, d); if (sp) { beginMove(rec, "start", sp, null, 0); return; } rec.feet = null; d.blendFrom = clock; }
     const pace = rec.walker?.bank ? 1 : Math.min(1, d.opts?.pace ?? 1), v = rec.speed * pace;
-    let left = (live ? Math.min(v * dt, rec.moveLeft) : v * dt) * (env.easeWalks && rec.walker?.mocap ? walkEase(rec, d, dt) : 1);
+    let left = (live ? Math.min(v * dt, rec.moveLeft) : v * dt) * (env.easeWalks && rec.walker?.mocap && !moving ? walkEase(rec, d, dt) : 1);
+    // a stop, or the turn before a sit, begins within this tick's walk: walk to where it begins, and it takes the rest of the tick
+    const due = moving ? moveDue(rec, d, left) : null, planned = left;
+    if (due) left = Math.min(left, due.at);
     let startLeft = left;
     const last = d.leg === d.route.length - 1;
     const rest = d.leg < d.route.length ? Math.hypot(d.route[d.leg][0] - rec.pos[0], d.route[d.leg][2] - rec.pos[2]) : 0;
@@ -720,6 +959,8 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     }
     // the feet move only while walking: the phase advances for the time actually walked
     advanceWalk(rec, rec.rate * pace * ((startLeft - left) / v));
+    // (only if the walk got there: someone in the way, or a pace cut, leaves it for the next tick to plan again)
+    if (due && startLeft - left >= due.at - 1e-6) { beginMove(rec, due.kind, due.opts, due.after, dt * Math.max(0, 1 - due.at / Math.max(1e-9, planned))); return; }
     const room = ctx.place?.roomAt?.(rec.pos, rec.floor);    // without a place to ask, a person stays in their room
     if (room != null) setRoom(rec, room);
     hold(rec);
@@ -744,6 +985,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   const centre = [0, 0, 0];             // the person's centre, handed to cam.sees (which copies it)
   function tick(t, dt, cam) {
     const out = { near: [], mid: [], far: [], visited: 0 };
+    moveMs = 0;
     clock += dt; frameNo++;
     // routes being searched, within a node budget shared round-robin, and within ctx.budgetMs when the host grants
     // time (holo-emitter's frame ledger: 0 on a starved frame, when nobody searches and those waiting stand on)
@@ -830,6 +1072,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
         rec.vel[0] = (rec.pos[0] - rec.tickX) / dt; rec.vel[1] = (rec.pos[2] - rec.tickZ) / dt;
       }
     }
+    out.moveMs = moveMs;
     return out;
   }
 
@@ -870,6 +1113,18 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   }
 
   return {
+    /** With captured moves (env.moves): make a person's moves once, unseen (their retarget, raw poses and paths are kept; the code is warmed), so the first
+     * start, stop or turn they make costs no more than the next. A page with one person close calls it as it loads. */
+    warmMoves(id) {
+      const rec = people.get(String(id)); if (!rec || !movesOn(rec)) return false;
+      const w = rec.walker;
+      for (const kind of Object.keys(MOVE_DEFS)) for (const mirror of [false, true]) {
+        const S = moveShape(w, kind, mirror), slots = Math.max(1, Math.ceil(S.duration / MOVE_SLOT - 1e-9));
+        makeMove(w, kind, { mirror, keepout: rec.dressing?.keepout ?? null, frames: slots * PACE_FRAMES + 1 });
+      }
+      feetOf(rec);
+      return true;
+    },
     // Diagnostic control: retain the pace bank and navigation, select Neutral's
     // retargeted capture speed for every body (including children).
     setSamePace(value) {

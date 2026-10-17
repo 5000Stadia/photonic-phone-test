@@ -1,6 +1,7 @@
 import {sittingBake,SIT_SEGMENTS,sitFrame} from './sitting.js';
 import { makeIdleWalker } from './mocap.js';
 import { between, ease, shifted, standingFeet, walkedBy, WALK_EASE } from './motion.js';
+import { MOVE_DEFS } from './moves.js';
 import { cycleAt, needsWalkBake, advanceBakedPhase, canRebakeAtPhase, childCycles, closestCycle } from "./walk-cache.js";
 import { desiredSpeed } from './pace-walk.js';
 import { walkSample } from './walk-sample.js';
@@ -529,7 +530,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   }
   // F + 1 frames into a slot (quaternion and offset rows, one quaternion sign along it): frame(f, out) fills out.Wm and out.Pm at every KEY-th
   // frame and the last; the frames between are the linear blend of their neighbours' rows, as the GPU's filtering blends any two frames
-  function storeFrames(slot, J, frame) {
+  function storeFrames(slot, J, frame, key = KEY) {
     standPose.J = J;
     const keyAt = (f) => {
       frame(f, standPose); writePose(standPose, standTmp, 0);
@@ -540,11 +541,11 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
         for (let c = 0; c < 4; c++) { standRows[q + c] = standPrev[bone * 4 + c] = sign * standTmp[k + c]; standRows[u + c] = standTmp[k + 4 + c]; }
       }
     };
-    for (let f = 0; f <= F; f += KEY) keyAt(f);
-    if (F % KEY) keyAt(F);
+    for (let f = 0; f <= F; f += key) keyAt(f);
+    if (F % key) keyAt(F);
     for (let f = 0; f <= F; f++) {
-      if (f % KEY === 0 || f === F) continue;
-      const f0 = f - f % KEY, f1 = Math.min(F, f0 + KEY), a = (f - f0) / (f1 - f0);
+      if (f % key === 0 || f === F) continue;
+      const f0 = f - f % key, f1 = Math.min(F, f0 + key), a = (f - f0) / (f1 - f0);
       for (let r = 0; r < 2 * B; r++) for (let c = 0; c < 4; c++) { const row = r * (F + 1) * 4; standRows[row + f * 4 + c] = standRows[row + f0 * 4 + c] * (1 - a) + standRows[row + f1 * 4 + c] * a; }
     }
     const bx = (slot % perRow) * (F + 1), by = Math.floor(slot / perRow) * 2 * B;
@@ -583,6 +584,61 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     storeFrames(m.base + 1, m.idler.J, (f, out) => { const s = f / F; between(sc, A(s), Bs(s), ease(s)); out.Wm.set(sc.Wm); out.Pm.set(sc.Pm); });
     m.mode = kind; m.t0 = animNow; m.duration = duration; standCounts.handovers++;
   }
+  // ---- a captured move (moves.js, the population's rec.move: a start, a stop, the turn before a sit) ---------------------------------------------------------
+  // Its poses, made by the population about the path it takes (rec.pos and rec.heading follow move.traj), baked into consecutive slots (64 frames a second's
+  // worth), every frame exact, each relative to the path where it is drawn. Here, as it is baked, the walk or the idle it begins from is blended into its first
+  // quarter second, and a start's last quarter second into the walk it hands to (motion.js between, the planted foot shared). Released when the move ends,
+  // its last pose kept for what follows (the idle's hand-over, or the sit-in).
+  const moveSlots = new WeakMap(), moveCounts = { bakes: 0, ms: 0, slots: 0 }, MOVE_KEY = 1;
+  function releaseMove(rec) { const st = moveSlots.get(rec); if (!st) return; freeWalk.push({ slot: st.base, count: st.slots }); walkCounts.slots -= st.slots; moveCounts.slots -= st.slots; moveSlots.delete(rec); }
+  // a move's frame j as drawn: its pose about the path there (the path's place and facing taken out)
+  function moveLocal(mv, j, out) {
+    const m = mv.move, f = m.frames[j], [x, z, y] = m.traj(j * m.dt), c = Math.cos(-y), s = Math.sin(-y);
+    for (let b = 0; b < B; b++) {
+      const o = b * 9;
+      for (let k = 0; k < 3; k++) { const a = f.W[o + k], w = f.W[o + 6 + k]; out.Wm[o + k] = c * a + s * w; out.Wm[o + 3 + k] = f.W[o + 3 + k]; out.Wm[o + 6 + k] = -s * a + c * w; }
+      const dx = f.P[b * 3] - x, dz = f.P[b * 3 + 2] - z; out.Pm[b * 3] = c * dx + s * dz; out.Pm[b * 3 + 1] = f.P[b * 3 + 1]; out.Pm[b * 3 + 2] = -s * dx + c * dz;
+    }
+    return out;
+  }
+  // a pose given in the move's frame (W, P), as drawn about the path at frame j
+  function aboutPath(mv, j, pose) {
+    const m = mv.move, [x, z, y] = m.traj(j * m.dt), c = Math.cos(-y), s = Math.sin(-y), W = new Float64Array(B * 9), P = new Float64Array(B * 3);
+    for (let b = 0; b < B; b++) {
+      const o = b * 9;
+      for (let k = 0; k < 3; k++) { const a = pose.W[o + k], w = pose.W[o + 6 + k]; W[o + k] = c * a + s * w; W[o + 3 + k] = pose.W[o + 3 + k]; W[o + 6 + k] = -s * a + c * w; }
+      const dx = pose.P[b * 3] - x, dz = pose.P[b * 3 + 2] - z; P[b * 3] = c * dx + s * dz; P[b * 3 + 1] = pose.P[b * 3 + 1]; P[b * 3 + 2] = -s * dx + c * dz;
+    }
+    return { W, P };
+  }
+  // a pose turned by yaw and moved by (x, z) (a walk's in-place pose put where the walk is in the move's frame)
+  function placed(pose, x, z, yaw) {
+    const c = Math.cos(yaw), s = Math.sin(yaw), W = new Float64Array(B * 9), P = new Float64Array(B * 3);
+    for (let b = 0; b < B; b++) {
+      const o = b * 9;
+      for (let k = 0; k < 3; k++) { const a = pose.W[o + k], w = pose.W[o + 6 + k]; W[o + k] = c * a + s * w; W[o + 3 + k] = pose.W[o + 3 + k]; W[o + 6 + k] = -s * a + c * w; }
+      const px = pose.P[b * 3], pz = pose.P[b * 3 + 2]; P[b * 3] = x + c * px + s * pz; P[b * 3 + 1] = pose.P[b * 3 + 1]; P[b * 3 + 2] = z - s * px + c * pz;
+    }
+    return { W, P };
+  }
+  function bakeMove(rec, m, from) {
+    const mv = rec.move, mo = mv.move, w = rec.walker, J = m.idler.J, sc = m.scratch, n = mo.n, blendN = Math.round(0.25 / mo.dt), t0 = performance.now();
+    const base = allocateWalk(mv.slots); if (base < 0) return null;
+    // what it begins from, in the move's frame: the walk going on at its pace (a stop, a turn), or the stander's pose (a start); and what a start hands to
+    const walkFrom = mv.kind !== "start" ? { slot: rec.walkSlot, phase: from.phase } : null, standFrom = mv.kind === "start" ? from.pose : null, exit = mv.kind === "start" ? mo.end.walk : null;
+    const begin = (t) => (walkFrom ? shifted(slotPose(walkFrom.slot, wrap(walkFrom.phase + t * w.f), J), 0, t * w.v) : standFrom);
+    const handTo = (t) => placed(slotPose(rec.walkSlot, wrap(exit.phase + t * w.f), J), exit.x + Math.sin(exit.yaw) * w.v * t, exit.z + Math.cos(exit.yaw) * w.v * t, exit.yaw);
+    const out = { Wm: new Float64Array(B * 9), Pm: new Float64Array(B * 3) };
+    for (let i = 0; i < mv.slots; i++) storeFrames(base + i, J, (f, o) => {
+      const j = i * F + f;
+      moveLocal(mv, j, out);
+      if (j <= blendN && (walkFrom || standFrom)) { between(sc, aboutPath(mv, j, begin(j * mo.dt)), { W: out.Wm, P: out.Pm }, ease(j / blendN)); out.Wm.set(sc.Wm); out.Pm.set(sc.Pm); }
+      if (exit && j >= n - 1 - blendN) { between(sc, aboutPath(mv, j, handTo((j - (n - 1)) * mo.dt)), { W: out.Wm, P: out.Pm }, ease((n - 1 - j) / blendN)); out.Wm.set(sc.Wm); out.Pm.set(sc.Pm); }
+      o.Wm.set(out.Wm); o.Pm.set(out.Pm);
+    }, MOVE_KEY);
+    const ms = performance.now() - t0; moveCounts.bakes++; moveCounts.slots += mv.slots; moveCounts.ms += ms; budgetLeft -= ms;
+    return { token: mv.token, base, slots: mv.slots, kind: mv.kind };
+  }
   function ensureStanding(rec, m) {
     if (m.base >= 0) return true;
     const base = allocateWalk(2); if (base < 0) return false;
@@ -591,6 +647,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   // the pose a stander is drawn in now (the idle at its phase, or partway through a hand-over)
   function standingNow(rec, m) {
     if (m.mode === "idle") return slotPose(m.base, wrap((animNow - m.idleT0) / m.idler.duration), m.idler.J);
+    if (m.mode === "move" && m.moveEnd) return m.moveEnd;
     return slotPose(m.base + 1, Math.min(1, (animNow - m.t0) / m.duration), m.idler.J);
   }
   // which foot stays planted when a walk stops at this phase: the one the capture has down; in double support, the leading one
@@ -608,6 +665,23 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
   }
   function chooseAnimation(rec, tier) {
     const m = motionOf(rec), stander = STANDING.has(tier) && !!rec.walker?.mocap;
+    // a captured move under way: its slots (baked as it begins), at its time
+    if (rec.move && stander && walkSlot(rec) && ensureStanding(rec, m)) {
+      const mv = rec.move;
+      let st = moveSlots.get(rec);
+      if (!st || st.token !== mv.token) {
+        if (st) releaseMove(rec);
+        const w = rec.walker, entry = mv.kind === "start" ? null : (((MOVE_DEFS[mv.kind].entryPhase + (mv.move.mirror ? 0.5 : 0) - (w.phaseOffset ?? 0)) % 1) + 1) % 1;
+        const from = mv.kind === "start" ? { pose: m.mode === "move" && m.moveEnd ? m.moveEnd : standingNow(rec, m) } : { phase: entry };
+        st = bakeMove(rec, m, from); if (!st) return null;
+        moveSlots.set(rec, st);
+      }
+      m.mode = "move"; m.moveEnd = null;
+      const dur = mv.move.duration / mv.slots, t = Math.min(mv.t, mv.move.duration), i = Math.min(mv.slots - 1, Math.floor(t / dur));
+      return { slot: st.base + i, phase: Math.min(1, (t - i * dur) / dur), kind: "move" };
+    }
+    // a move just ended: its last pose kept for what follows, its slots let go
+    if (!rec.move && moveSlots.has(rec)) { const st = moveSlots.get(rec); m.moveEnd = slotPose(st.base + st.slots - 1, 1, rec.far.J); releaseMove(rec); }
     if (rec.sitting && SIT_SEGMENTS.includes(rec.sitting.segment)) {
       const seated = sittingSlot(rec); if (!seated) return null;
       const segment = rec.sitting.segment, sit = seatedSlots.get(rec);
@@ -646,7 +720,8 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const walk = { slot: rec.walkSlot, phase: rec.walkPhase ?? rec.phase, kind: walking ? "walk" : "held" };
     if (!stander) { if (m.mode !== "sit") m.mode = "walk"; return walk; }
     if (walking) {
-      if ((m.mode === "idle" || m.mode === "stop" || m.mode === "rise" || (m.mode === "sit" && m.risen)) && m.base >= 0 && budgetLeft > 0) {
+      if (m.mode === "move") { const st = bakedCycles.get(rec); if (st) { st.phase = rec.phase; st.distance = rec.walkDistance ?? 0; rec.walkPhase = rec.phase; } m.mode = "walk"; m.moveEnd = null; return { ...walk, phase: rec.phase }; }
+      if ((m.mode === "idle" || m.mode === "stop" || m.mode === "settle" || m.mode === "rise" || (m.mode === "sit" && m.risen)) && m.base >= 0 && budgetLeft > 0) {
         // stand -> walk: the standing pose stays put in the world while the walk carries the person on, as fast as the population's start
         // eases them (walkedBy: the same curve), so the hand-over ends on the very phase the walk then plays
         // (a population that does not ease its walks moves them at full pace from the first frame: the standing pose is left behind faster)
@@ -660,10 +735,18 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       m.mode = "walk"; return walk;
     }
     // standing still
-    if (m.mode === "walk" || m.mode === "sit" || m.mode === "start" || m.mode === null) {
+    if (m.mode === "walk" || m.mode === "sit" || m.mode === "start" || m.mode === null || m.mode === "move") {
       if (budgetLeft <= 0 || !ensureStanding(rec, m)) return walk;
       const t = performance.now(), idle = m.idler, J = idle.J;
-      if (m.mode === null || (m.mode === "sit" && !m.risen)) { bakeIdle(rec, m, idle.homeFeet); m.mode = "idle"; m.idleT0 = animNow - rec.rank * idle.duration; }
+      if (m.mode === "move") {
+        // after a captured stop: the idle with the feet where its last steps left them (rec.feet: the population's), settled into from its last pose
+        // (both standing: the actor's stance at the stop's end and the idle loop's first pose)
+        const A = m.moveEnd ?? slotPose(rec.walkSlot, wrap(walk.phase), J);
+        bakeIdle(rec, m, rec.feet ?? standingFeet(idle, A, 2));
+        const B0 = slotPose(m.base, 0, J);
+        bakeHandover(m, "settle", () => A, () => B0, 0.4); m.moveEnd = null;
+      }
+      else if (m.mode === null || (m.mode === "sit" && !m.risen)) { bakeIdle(rec, m, idle.homeFeet); m.mode = "idle"; m.idleT0 = animNow - rec.rank * idle.duration; }
       else {
         const rising = m.mode === "sit", A = rising ? m.risen : slotPose(rec.walkSlot, wrap(walk.phase), J);
         bakeIdle(rec, m, standingFeet(idle, A, rising ? 2 : plantedFoot(rec.walker, walk.phase, A)));
@@ -672,7 +755,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       }
       standCounts.bakes++; standCounts.ms += performance.now() - t; budgetLeft -= performance.now() - t;
     }
-    if (m.mode === "stop" || m.mode === "rise") {
+    if (m.mode === "stop" || m.mode === "settle" || m.mode === "rise") {
       const s = (animNow - m.t0) / m.duration;
       if (s < 1) return { slot: m.base + 1, phase: s, kind: m.mode, offset: feetCentre(m) };
       m.mode = "idle"; m.idleT0 = m.t0 + m.duration;
@@ -858,7 +941,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       if (walkDirty) { walkTex.needsUpdate = true; walkDirty = false; walkCounts.uploadFrames++; }
       counts.walk = { ...walkCounts, textureBytes: walkData.byteLength };
       counts.sitting = {...sitCounts, bytesPerSitter:3*(F+1)*B*2*4*2};
-      counts.standing = { ...standCounts };
+      counts.standing = { ...standCounts }; counts.moves = { ...moveCounts };
       for (const st of [...Object.values(stores), ...Object.values(gstores)]) if (st.dirty) { st.tex.needsUpdate = true; st.dirty = false; }
       contact.end();
       counts.contactDraws = contact.mesh.count ? 1 : 0;

@@ -22,6 +22,7 @@
 import {BONES,rng} from '../body.js';
 import {readBVH,ID,mm,mv,tr,sub,turn,rot} from '../bvh.js';
 const load=async name=>{const url=new URL('../100style/'+name+'.bvh',import.meta.url);return readBVH(typeof process!=='undefined'&&process.versions?.node?await (await import('node:fs/promises')).readFile(url,'utf8'):await (await fetch(url)).text());};
+export const loadCapture=load;
 export const CAPTURE=await load('Neutral_FW_trim');
 const captures=await Promise.all(['Neutral_slow','Rushed_urgent','Neutral_idle'].map(load));
 export const IDLE_CAPTURE=captures[2];
@@ -47,7 +48,7 @@ const ABSOLUTE=new Set([5,9]);
 // The capture's sole points (cm, 100STYLE's shared skeleton): a heel pivot in the ankle frame, fitted
 // as the point that stays lowest and stillest from heel strike to foot flat in the Neutral cycle,
 // and the ball and toe tip under the toe joint (its end site is 1.29 cm below and 4.89 ahead).
-const CAPTURE_SOLE=[['Ankle',[0,-11.5,-12]],['Toe',[0,-1.29,0]],['Toe',[0,-1.29,4.89]]];
+export const CAPTURE_SOLE=[['Ankle',[0,-11.5,-12]],['Toe',[0,-1.29,0]],['Toe',[0,-1.29,4.89]]];
 const floorOf=(C,a,b)=>{let lo=Infinity;for(let f=a;f<=b;f++)for(const n of ['LeftToe_End','RightToe_End'])lo=Math.min(lo,C.frames[f][C.index[n]].P[1]);return lo;};
 function polar(M){let m=M.slice();for(let it=0;it<8;it++){const [a,b,c,d,e,f,g,h,i]=m,A=e*i-f*h,B=f*g-d*i,C=d*h-e*g,det=a*A+b*B+c*C;
  const inv=[A/det,B/det,C/det,(c*h-b*i)/det,(a*i-c*g)/det,(b*g-a*h)/det,(b*f-c*e)/det,(c*d-a*f)/det,(a*e-b*d)/det];m=m.map((v,k)=>.5*(v+inv[k]));}return m;}
@@ -68,7 +69,7 @@ function rigSole(J,side) {
  return [at(a,J[a],-.36,0),at(a,J[a],-.30,.04),at(t,J[t],0,0),at(t,J[t],.54,0)];
 }
 
-function captureFunctions(C,range,version,{idle=false}={}) {
+export function captureFunctions(C,range,version,{idle=false}={}) {
 const MAP=map(C);
 const forward=C.frames.map(f=>mv(tr(f[0].W),sub(f[C.index.LeftAnkle].P,f[0].P))[2]);
 const strikes=[];for(let i=1;i<forward.length-1;i++)if(forward[i]>forward[i-1]&&forward[i]>=forward[i+1]&&(!strikes.length||i-strikes.at(-1)>40))strikes.push(i);

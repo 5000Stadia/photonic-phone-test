@@ -20,10 +20,11 @@ export const PEOPLE_API = "photonic.people/1";
 
 const WORDS_PER_SECOND = 2.6;   // a default speaking pace when a line has no duration and no clock
 
-export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true, exactArms = false, easeWalks = false, review = false } = {}) {
+export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, capacity, exactCapacity, nearCapacity, bakeBudgetMs, outfits, quality, overflow, samePace = true, exactArms = false, easeWalks = false, moves = false, review = false } = {}) {
   // exactArms: each walker finds its own minimal arm openings over its own clothes (about 12 ms a person, once) instead of the nearest padded bin's
   // easeWalks: walks start and stop over about half a second (population.js), which the stand hand-overs read best with; it changes trip timing
-  let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, exactArms, easeWalks, ...(outfits !== undefined ? { outfits } : {}) });
+  // moves: captured starts, stops and the turn before a sit (moves.js), in place of the stand hand-overs' blends and the turn on the spot; it changes trip timing
+  let pop = makePopulation({ ctx, basis, thresholds, planBudget, samePace, exactArms, easeWalks, moves, ...(outfits !== undefined ? { outfits } : {}) });
   // review: the animation review page only (lab/hero-motion), where a person may be shown nude to judge the motion and the body (draw.js makeDraw)
   let draw = makeDraw(THREE, { capacity, exactCapacity, nearCapacity, bakeBudgetMs, quality, overflow, review });
   const frustum = new THREE.Frustum(), m4 = new THREE.Matrix4(), sphere = new THREE.Sphere(), v = new THREE.Vector3(), w = new THREE.Vector3();
@@ -94,6 +95,8 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
     /** Make the draws a renderer will need (the base class, and the placeholder rule's four outfits (gentlewoman, gentleman, workwoman, workman) unless `outfits` is false or a rule of your own, whose outfits `list` names) before anyone is seen, so `renderer.compileAsync(scene, camera)` can compile them
      *  behind a loading screen instead of at the first frame. Returns how many draws there are. Draws made later, for a class not warmed, still come when someone is first in it. */
     warm: (list) => draw.warm(list ?? (outfits === false || outfits !== undefined ? [] : [GENTLEWOMAN, GENTLEMAN, WORKWOMAN, WORKMAN])),
+    /** With `moves`: make a person's captured moves once, unseen, so their first start, stop or turn costs no more than the next (population.js) */
+    warmMoves: (id) => pop.warmMoves(id),
     /** Compile what warm() made on a renderer, concurrently (see draw.js compile), the skirts' render-to-texture passes too, which `renderer.compileAsync(scene, camera)` does not reach. Use it beside that call:
      *  `await Promise.all([renderer.compileAsync(scene, camera), people.compile(renderer, scene, camera)])`, with the group already in the scene. */
     compile: (renderer, scene, camera, opts) => draw.compile(renderer, scene, camera, opts),
@@ -111,7 +114,8 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
       // ctx.spent says back what each took, so the ledger counts each job's own time
       const sorted = pop.tick(t, dt, cam);
       counts = draw.update(sorted, t, Number.isFinite(ctx.bakeMs) ? ctx.bakeMs : undefined);
-      if (Number.isFinite(ctx.budgetMs) || Number.isFinite(ctx.bakeMs)) ctx.spent = { ways: sorted.searchMs, bake: counts.bakeMs };
+      // (a captured move's poses, made by the tick as it begins, are baking too: moves.js)
+      if (Number.isFinite(ctx.budgetMs) || Number.isFinite(ctx.bakeMs)) ctx.spent = { ways: sorted.searchMs, bake: counts.bakeMs + (sorted.moveMs ?? 0) };
       return counts;
     },
     add: (doc) => handle(pop.add(doc)),

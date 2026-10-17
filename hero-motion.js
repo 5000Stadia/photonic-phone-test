@@ -4,14 +4,16 @@
 // doublet": an adult in working dress, whose close breeches and short doublet hide little of the legs and arms.
 //   Do: walk, stop, sit, stand up, or the tour of all of them. View: orbit (drag), side, front, three-quarter, back, face, feet; the camera follows him.
 //   Time: 1x, 1/2, 1/4, 1/10, pause, step a frame. Capture: the raw captured skeleton over him (pale lines), aligned at the pelvis and scaled to his
-//   hip height: compare the angles of the limbs. Hand-overs (stop, start, rise, sit-in) are blended, not captured, so no capture is shown for them.
+//   hip height: compare the angles of the limbs. The start, the stop and the turn before sitting are captured too (round 4, src/people/moves.js: ?moves=0
+//   for round 3's blends and the turn on the spot); the short settles between captures (into the idle, the sit-down, the rise) are blended, and no
+//   capture is shown for them.
 //   Body: nude (the default here, to judge the motion and the body itself; Kabe, 2026-10-15), the undergarments (the base layer), or dressed in
 //   his working clothes; the sliders change the body (age, sex, height, build, muscle, skin) live. The crowd is always dressed: only this page
 //   asks the draw for a nude person (makePeople review). Chair: with arms (his hands on the armrests, as the captured sitter's were) or without
 //   (on his own thighs and knees).
 //   ?view=side|front|...  ?hold=1 (the camera held still)  ?capture=1  ?do=walk|stop|sit|rise|tour  ?body=nude|under|dressed  ?arms=1  ?keepout=0 (arms as captured, clothes
-//   ignored: a diagnostic)  ?gl=1 (WebGL2)
-// window.hero: { go(action), view(name), speed(x), advance(seconds), render(), state(), clothes(mode), arms(on), body(params), ready } for stills.
+//   ignored: a diagnostic)  ?moves=0 (round 3's blended starts and stops)  ?gl=1 (WebGL2)
+// window.hero: { go(action), view(name), speed(x), advance(seconds), render(), state(), clothes(mode), arms(on), body(params), track(heading), frame(x, z, d), ready } for stills.
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { makePeople } from "./people/index.js";
@@ -19,6 +21,7 @@ import { WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN, setFit } from "./people/gar
 import { loadSitting, makeSitting, fittingSeatHeight, sitFrame } from "./people/sitting.js";
 import { skinColour } from "./people/shape.js";
 import { CLIPS, IDLE, CAPTURE, IDLE_CAPTURE } from "./people/mocap.js";
+import { loadMoves, MOVE_DEFS, moveTake, moveShape } from "./people/moves.js";
 import { BONES } from "./people/bodies.js";
 import { makeStage } from "./plaza.js";
 import { loadBasis } from "./gait.js";
@@ -61,7 +64,11 @@ const fitted = q.get("fit") !== "0";
 setFit(fitted);
 const cast = castOf(), who = cast.find((c) => c.id === HERO);
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
-const people = makePeople(THREE, { basis, thresholds: { near: 400, mid: 800 }, nearCapacity: 4, capacity: 8, exactArms: true, easeWalks: true, review: true,
+// moves: the captured start, stop and turn before a sit (round 4: src/people/moves.js), in place of the blended hand-overs and the turn on the spot; ?moves=0
+// the round-3 blends, for comparison
+const movesOn = q.get("moves") !== "0";
+if (movesOn) await loadMoves();
+const people = makePeople(THREE, { basis, thresholds: { near: 400, mid: 800 }, nearCapacity: 4, capacity: 8, exactArms: true, easeWalks: true, moves: movesOn, review: true,
   outfits: (id) => (id === HERO && who.dress?.outfit ? { outfit: who.dress.outfit, look: who.dress.look } : null) });
 scene.add(people.group);
 people.warm([WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN]);
@@ -72,6 +79,7 @@ function addHero(pos, heading, phase) {
   hero = people.add({ id: HERO, seed: who.seed, recipe: who.said, at: { pos, room: "hall" }, state: { heading, phase }, ...(bodyOver ? { body: bodyOver } : {}) });
   dressedList = hero.worn();           // what the words dress him in, to put back on
   applyClothes();
+  if (movesOn) people.warmMoves(HERO);  // (his moves made once now, so the first start or stop does not drop frames)
 }
 function applyClothes() {
   const rec = people.inspect(HERO).rec;
@@ -86,8 +94,10 @@ const sitBank = await loadSitting();
 const rec0 = people.inspect(HERO).rec, { J, tip } = rec0.body.joints;
 const seatH = fittingSeatHeight(sitBank, J, tip, rec0.height, "113_15");
 const fit = makeSitting(sitBank, J, tip, rec0.height, seatH, "113_15"), first = fit.pose(fit.spec.segments.sitDown[0]).P[0];
-// the chair faces the walking line from its side (facing +x, away from the side view's camera): he walks up the line, turns to it and sits
-const CHAIR = [-1.6, 0], FACING = Math.PI / 2, c = Math.cos(FACING), s = Math.sin(FACING);
+// the chair faces the walking line from its side (facing +x, away from the side view's camera): he walks from the line straight in to it, turns about and sits.
+// (Round 4: 4.2 m out, level with where the tour leaves the line, so the captured start, the walk in and the captured about-turn all have their room, and
+// from there the turn is the capture's own, hardly warped; it stood 1.6 m out, where the captured moves cannot fit and he turned on the spot.)
+const CHAIR = movesOn ? [-4.2, -1.5] : [-1.6, 0], FACING = Math.PI / 2, c = Math.cos(FACING), s = Math.sin(FACING);
 const seat = { id: "chair", floor: 0, height: seatH, facing: FACING, width: 0.46, depth: 0.42,
   contact: [CHAIR[0] - (c * first[0] + s * first[2]), CHAIR[1] - (-s * first[0] + c * first[2])] };
 // its arms (the seat contract, design/r6-seats.md: side is the sitter's own, at the armrest top's centre projected to the floor, height above the
@@ -126,13 +136,13 @@ let plan = null, planStep = 0, waitUntil = 0, leg = 1;
 const say = (html) => { $("note").innerHTML = html; };
 const actions = {
   walk() { plan = null; const s = hero.state(); if (s.sitting) hero.stand(); leg = Math.abs(s.at.pos[2] - LINE[1][2]) < Math.abs(s.at.pos[2] - LINE[0][2]) ? 0 : 1; hero.goTo({ pos: LINE[leg] }); say("Walking the line, end to end. Stop to stand where he is."); },
-  stop() { plan = null; const s = hero.state(); if (s.sitting) { hero.stand(); say("Standing up."); return; } hero.goTo({ pos: s.at.pos }); say("Standing: the captured idle, the feet planted where the last step left them."); },
-  sit() { plan = null; hero.sit(seat).then((ok) => say(ok ? "To the chair: the last steps, a turn, the captured sit-down, then seated." : '<span class="warn">The capture does not fit this seat.</span>')).catch(fail); },
+  stop() { plan = null; const s = hero.state(); if (s.sitting) { hero.stand(); say("Standing up."); return; } hero.goTo({ pos: s.at.pos }); say(movesOn ? "Stopping: on to the walk's next chance, the captured stop, then the idle, the feet planted where the stop left them." : "Standing: the captured idle, the feet planted where the last step left them."); },
+  sit() { plan = null; hero.sit(seat).then((ok) => say(ok ? (movesOn ? "To the chair: setting off, walking in, the captured about-turn, the captured sit-down, then seated." : "To the chair: the last steps, a turn, the captured sit-down, then seated.") : '<span class="warn">The capture does not fit this seat.</span>')).catch(fail); },
   rise() { plan = null; hero.stand(); say("Standing up: the captured rise, then a short hand-over to standing."); },
   tour() { plan = TOUR; planStep = 0; waitUntil = 0; say("The tour: walk, stop, stand, walk to the chair, sit, sit a while, rise, stand, again."); },
 };
 const TOUR = [
-  () => { hero.goTo({ pos: [0, 0, 2.5] }); return "arrive"; },
+  () => { hero.goTo({ pos: [0, 0, movesOn ? 3 : 2.5] }); return "arrive"; },
   () => 3, // stand 3 s
   () => { hero.goTo({ pos: [0, 0, -1.5] }); return "arrive"; },
   () => { hero.sit(seat).catch(fail); return "seated"; },
@@ -175,6 +185,8 @@ function centre(info) {
   return [r.pos[0] + lx * ch + lz * sh, r.pos[2] + lz * ch - lx * sh, h];
 }
 let holdCam = q.get("hold") === "1";        // Hold: the camera stays where it is (the motion against a still background)
+let trackH = null;                          // window.hero.track: the view's bearing held while it follows him (a turn seen as a turn, for stills)
+let frameAt = null;                         // window.hero.frame: the view looking at a fixed place from a set distance (a whole move in one still frame)
 function place(snap, force = false) {
   const info = people.inspect(HERO); if (!info) return;
   let [x, z, h] = centre(info), v = VIEWS[view], y = v?.h ?? 0.95;
@@ -187,9 +199,10 @@ function place(snap, force = false) {
     let lx = 0, ly = 0, lz = 0; for (const j of js) { lx += P[j * 3] / js.length; ly += P[j * 3 + 1] / js.length; lz += P[j * 3 + 2] / js.length; }
     x = r.pos[0] + lx * ch + lz * sh; z = r.pos[2] + lz * ch - lx * sh; y = r.pos[1] + ly + (v.up ?? 0);
   }
-  const a = h + v.az, ce = Math.cos(v.el);
+  const a = (trackH ?? h) + v.az, ce = Math.cos(v.el), d = frameAt?.d ?? v.d;
+  if (frameAt) { x = frameAt.x; z = frameAt.z; }
   target.set(x, y, z);
-  const want = new THREE.Vector3(x + Math.sin(a) * v.d * ce, y + Math.sin(v.el) * v.d, z + Math.cos(a) * v.d * ce);
+  const want = new THREE.Vector3(x + Math.sin(a) * d * ce, y + Math.sin(v.el) * d, z + Math.cos(a) * d * ce);
   if (snap) camera.position.copy(want); else camera.position.lerp(want, 0.18);
   controls.target.copy(target); lastTarget.copy(target);
 }
@@ -214,6 +227,14 @@ function captureNow(info) {
   const w = info.rec.walker, b1 = w?.bank?.[1] ?? w;
   if (a.kind === "walk" || a.kind === "held") { const clip = CLIPS[1]; return { ...bvhJoints(CAPTURE, clip.channels(a.phase + (b1?.phaseOffset ?? 0)), clip.yaw), scale: b1?.kv ?? 1, label: "100STYLE Neutral walk" }; }
   if (a.kind === "idle") return { ...bvhJoints(IDLE_CAPTURE, IDLE.channels(a.phase), IDLE.yaw), scale: b1?.kv ?? 1, label: "100STYLE Neutral idle" };
+  if (a.kind === "move" && info.rec.move) {
+    const mv = info.rec.move, def = MOVE_DEFS[mv.kind], T = moveTake(mv.kind), S = moveShape(w, mv.kind, mv.move.mirror), t = Math.min(mv.t, mv.move.duration);
+    const row = def.from + t / T.dt, u = Math.min(S.n - 1, (t / S.duration) * (S.n - 1)), i = Math.min(S.n - 2, Math.floor(u)), face = S.py[i] + (S.py[i + 1] - S.py[i]) * (u - i);
+    // his body against his path is the capture's against its own (moves.js): the capture turned from its own path's facing to his path's, about him
+    const J = bvhJoints(T.C, T.F.channels(Math.min(row, T.n - 1 - 1e-6) / (T.n - 1), false), mm(rot("Y", ((-face * (mv.move.mirror ? -1 : 1)) * 180) / Math.PI), T.F.yaw));
+    if (mv.move.mirror) J.pos = J.pos.map(([x, y, z]) => [-x, y, z]);
+    return { ...J, scale: b1?.kv ?? 1, label: `100STYLE ${T.source} ${T.first + 2 * Math.round(row)}: the captured ${mv.kind}${mv.move.mirror ? " (mirrored)" : ""}` };
+  }
   if (a.kind === "sitDown" || a.kind === "seated" || a.kind === "standUp") {
     const motion = info.rec.sitMotion; if (!motion) return null;
     const clip = sitBank.find((b) => b.spec.id === motion.spec.id), frame = sitFrame(motion.spec, a.kind, a.phase), src = sampleAcclaim(clip.C, frame);
@@ -322,6 +343,12 @@ for (const [label, on] of [["Fitted cut", true], ["Crowd's cut", false]]) {
   b.classList.toggle("on", on === fitted);
 }
 
+// ---- the moves: captured (round 4, the default) or round 3's blends and the turn on the spot (a reload, keeping the rest of the address) ----
+for (const [label, on] of [["Captured", true], ["Blended", false]]) {
+  const b = mk("moves", label, () => { const u = new URL(location.href); u.searchParams.set("moves", on ? "1" : "0"); location.href = u.href; }, on ? "setting off, stopping and the turn before sitting from the captures" : "round 3: blended starts and stops, the turn on the spot before sitting, for comparison");
+  b.classList.toggle("on", on === movesOn);
+}
+
 // ---- the loop ----
 let t = 0, last = performance.now(), frames = 0, since = last, fps = 0, label = "";
 function tick(dt) {
@@ -359,6 +386,10 @@ window.hero = {
   clothes: (mode) => setClothes(mode),
   arms: (on) => setArms(on),
   hold: (on = true) => { holdCam = on; bHold.classList.toggle("on", on); },
+  /** the views' bearing held at a heading (radians; true: his heading now; null: following his turns again) */
+  track: (h) => { trackH = h === true ? people.inspect(HERO).rec.heading : h ?? null; place(true, true); },
+  /** the views looking at the floor point (x, z) from d metres, held there (null: following him again) */
+  frame: (x, z, d) => { frameAt = x === null || x === undefined ? null : { x, z, d }; place(true, true); },
   /** a body from slider values ({ age, sex, height, build, muscle, skin (melanin 0..1) }, the rest kept) */
   body: (v) => { for (const [k, x] of Object.entries(v)) if (k in sliderValues) { sliderValues[k] = x; sliderInputs[k].input.value = x; sliderInputs[k].out.textContent = sliderInputs[k].fmt(x); } bodyOver = { age: sliderValues.age, sex: sliderValues.sex, height: sliderValues.height, build: sliderValues.build, muscle: sliderValues.muscle, skin: skinColour(sliderValues.skin) }; rebody(); },
 };
