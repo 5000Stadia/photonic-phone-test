@@ -107,7 +107,11 @@ export function makePeople(THREE, { ctx = {}, basis, thresholds, planBudget, cap
         const done = s.clock ? s.clock() >= s.duration : t >= s.end;
         if (done) { speaking.delete(id); extra.push({ type: "said_end", id, line: s.line }); }
       }
-      counts = draw.update(pop.tick(t, dt, cam), t);
+      // the host's frame ledger (holo-emitter's frame-budget.js): ctx.budgetMs grants the route searches' time (population.js), ctx.bakeMs the bakes', each read every frame;
+      // ctx.spent says back what each took, so the ledger counts each job's own time
+      const sorted = pop.tick(t, dt, cam);
+      counts = draw.update(sorted, t, Number.isFinite(ctx.bakeMs) ? ctx.bakeMs : undefined);
+      if (Number.isFinite(ctx.budgetMs) || Number.isFinite(ctx.bakeMs)) ctx.spent = { ways: sorted.searchMs, bake: counts.bakeMs };
       return counts;
     },
     add: (doc) => handle(pop.add(doc)),

@@ -821,9 +821,9 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       return disposal;
     },
     /** `now` is monotonic seconds (defaults to the wall clock); it gates adult upload batches.
-     * Draw this frame's tiers (population.tick's result). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
-    update(sorted, now = performance.now() / 1000) {
-      budgetLeft = bakeBudgetMs; animNow = now;
+     * Draw this frame's tiers (population.tick's result), baking within `grantMs` (default bakeBudgetMs; 0: no bake, so people new to the view wait a frame, as when the budget is spent). Returns the counts drawn per tier, `classes`: how many (tier, class) draws are in use, and `passes`: the skirts' render-to-texture passes (one a stage for every dressed person of a class, never one a person). */
+    update(sorted, now = performance.now() / 1000, grantMs = bakeBudgetMs) {
+      const granted = Math.max(0, grantMs); budgetLeft = granted; animNow = now;
       batchDue = now + 1e-9 >= nextBatch;
       if (batchDue) nextBatch = now + .5;
       hair.begin(); contact.begin();
@@ -844,6 +844,7 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       const t0 = performance.now(), usedNear = run("near", fitTier(sorted.near, stores.near, demoted)), t1 = performance.now();
       const usedMid = run("mid", fitTier(demoted.length ? demoted.concat(sorted.mid) : sorted.mid, stores.mid, farOverflow)), t2 = performance.now(), usedFar = run("far", farOverflow.length ? farOverflow.concat(sorted.far) : sorted.far), t3 = performance.now();
       counts.bakes = { ...bakes }; counts.ms = { near: t1 - t0, mid: t2 - t1, far: t3 - t2 };
+      counts.bakeMs = granted - budgetLeft;          // what the bakes (and the hair's hand-overs) took of the grant this frame, an overrun included
       for (const e of entries.values()) if (e.count !== 0 && !usedNear.has(e) && !usedMid.has(e) && !usedFar.has(e)) finish(e, 0);          // a class nobody is in any more is emptied once, not uploaded every frame
       for (const e of entries.values()) if (e.count > 0) counts.classes++;
       for (const sh of Object.values(dressedTiers)) {

@@ -747,7 +747,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
     clock += dt; frameNo++;
     // routes being searched, within a node budget shared round-robin, and within ctx.budgetMs when the host grants
     // time (holo-emitter's frame ledger: 0 on a starved frame, when nobody searches and those waiting stand on)
-    const grant = Number.isFinite(ctx.budgetMs) ? ctx.budgetMs : Infinity, until = grant < Infinity ? performance.now() + grant : Infinity;
+    const grant = Number.isFinite(ctx.budgetMs) ? ctx.budgetMs : Infinity, searchFrom = performance.now(), until = grant < Infinity ? searchFrom + grant : Infinity;
     for (let budget = planBudget, k = 0; grant > 0 && planners.length && budget > 0 && k < planners.length * 2 && (until === Infinity || performance.now() < until); k++) {
       const pl = planners.shift(), slice = Math.max(1, Math.floor(budget / (planners.length + 1)));
       budget -= slice;
@@ -755,6 +755,7 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
       const r = pl.stepper.step(slice);
       if (r === undefined) planners.push(pl); else setRoute(pl.rec, r);
     }
+    out.searchMs = performance.now() - searchFrom;
     // arrivals due for people nobody steps (people being stepped arrive by walking, detours and all)
     while (arrivals.length && arrivals[0].time <= clock + 1e-9) {
       const e = heapPop(), rec = people.get(e.id);
