@@ -42,7 +42,8 @@ import { bind, bindToTriangle } from "./bind.js";
 import { normalsOf, TriGrid } from "./geom.js";
 import { BI } from "./wearer.js";
 import { neckline, pseudoAngle } from "./layer.js";
-import { GENTLEWOMAN, MEAN_BODIES, BASE_CUT, OUTFITS, cutFor, templateFor } from "./outfit.js";
+import { GENTLEWOMAN, MEAN_BODIES, BASE_CUT, OUTFITS, cutFor, templateFor, FIT } from "./outfit.js";
+import { UVN, BASE_LAYER } from "../../spikes/makehuman/index.js";
 import { layerCut } from "./layer.js";
 import { bodyNormals } from "./bind.js";
 import { packed } from "./pack.js";
@@ -128,7 +129,7 @@ function shapeToFull(pos, index, part, grids, full) {
 
 /** The far fit's training people of a cut's sex and ages (at most TUNE.people of them, evenly from the 1,200). */
 function trainingPeople(cutId) {
-  const outfit = Object.values(OUTFITS).find((o) => o.cuts.some((c) => c.bodice === cutId)), cut = outfit.cuts.find((c) => c.bodice === cutId), male = MEAN_BODIES[cutId].sex > 0.5, all = [];
+  const outfit = Object.values(OUTFITS).find((o) => o.cuts.some((c) => c.bodice === cutId || c.fit?.bodice === cutId)), cut = outfit.cuts.find((c) => c.bodice === cutId || c.fit?.bodice === cutId), male = MEAN_BODIES[cutId].sex > 0.5, all = [];
   for (let i = 0, n = 0; n < 1200; i++) {
     const res = resolve({ id: `far-fit:${i}`, seed: 9000 + i * 7919, said: "" }); if (!res.ok) continue; n++;
     const params = paramsFor(res.values, res.derived);
@@ -233,6 +234,8 @@ export function buildReducedTemplate(cutId) {
 }
 export function reducedTemplateFor(cutId) {
   let t = reduced.get(cutId);
+  // (a fitted cut, garments/outfit.js setFit, is tried at near on the hero's page first: at mid and far it is drawn in its crowd cut's reduced template until one is packed for it)
+  if (!t && cutId.endsWith("-fit") && !packed("reduced:" + cutId)) return reducedTemplateFor(cutId.slice(0, -4));
   if (!t) { t = packed("reduced:" + cutId) ?? buildReducedTemplate(cutId); reduced.set(cutId, t); }
   return t;
 }
@@ -267,6 +270,32 @@ export function bakeReduced(redPositions, params, outfit = GENTLEWOMAN, J = null
   return { cut, bodice: { template: tpl, ...fitReduced(tpl, redPositions, J, params.height) } };
 }
 
+// ---- what the fitted clothes hide at near (round 3 of the hero study, garments/outfit.js setFit) ---------------------------------------------------------------------------------
+// Cut close, the doublet and the breeches stand 1 to 3 cm off the skin, and the body (and the base layer, 0.7 cm out) came through them by a few millimetres to a few centimetres
+// walking and sitting; the old cut's volume had hidden that. So, as MakeHuman's delete_verts and the mid and far tiers already do for the bodice, what is under them is not drawn
+// at near: the body under the doublet's torso and sleeves (its hides), the base layer (all of it, under the doublet), and the body and layer under the
+// breeches (the legs' and hips' vertices of the cut's mean body from the hip down to 2% of the height above the knee, the band covering the knee). Per vertex, two bits: 1 under the
+// doublet, 2 under the breeches; a triangle is dropped when its three vertices are under what is worn.
+const UNDER = new Map();
+function hiddenUnderFitted(tpl, base) {
+  if (UNDER.has(base)) return UNDER.get(base);
+  const out = new Uint8Array(NEAR.V), reg = (tpl.hidesNear ?? tpl.hides).region, mean = buildNear(MEAN_BODIES[base]), J = mean.joints.J, H = MEAN_BODIES[base].height;
+  // (the torso and the upper arms under the sleeves: the closer sleeve let the shoulder through it as the arm came forward, seated with the hands on the thighs)
+  for (let v = 0; v < UVN; v++) if (reg[v]) out[v] |= 1;
+  // (the whole of the base layer: the working man's shirt shows only as the shirt sleeves and the band, which are the doublet's own parts, and the layer's short sleeves and
+  // high collar are under the doublet's sleeves and band; under the closer doublet the layer came through it in patches along the shoulders and over the chest)
+  for (let i = 0; i < BASE_LAYER.count; i++) out[UVN + i] |= 1;
+  const kneeY = Math.max(J[BI.shinL][1], J[BI.shinR][1]) + 0.02 * H, hipY = 0.5 * (J[BI.thighL][1] + J[BI.thighR][1]);
+  for (let v = 0; v < UVN + BASE_LAYER.count; v++) {
+    let leg = 0, arm = 0, hips = 0; for (let k = 0; k < K; k++) { const b = NEAR.skinIndex[v * K + k], x = NEAR.skinWeight[v * K + k]; if (LEG_BONES.has(b)) leg += x; if (ARM_BONES.has(b)) arm += x; if (b === BI.hips) hips += x; }
+    const y = mean.position[3 * v + 1];
+    if (arm < 0.5 && y > kneeY && y < hipY + 0.06 * H && leg + hips >= 0.5) out[v] |= 2;          // (MakeHuman weights the top of the thigh between the hips and the thigh)
+  }
+  UNDER.set(base, out);
+  return out;
+}
+const indexUnder = (index, under, mask) => { const m = mask & 3, o = []; for (let t = 0; t < index.length; t += 3) { const a = index[t], b = index[t + 1], c = index[t + 2]; if (!(under[a] & m && under[b] & m && under[c] & m)) o.push(a, b, c); } return Uint16Array.from(o); };
+
 // ---- what the bodice hides of the reduced body ------------------------------------------------------------------------------------------------------------------------------
 const HIDDEN = new Map();
 /** The reduced body's vertices that every cut of an outfit's bodice hides (the intersection of the cuts' hides.reduced): hide only what everyone's bodice covers, and only under its torso piece: the
@@ -282,6 +311,11 @@ export function hiddenReduced(outfit = GENTLEWOMAN) {
 /** A bodice template's triangles less those of one part (the neckwear is part 3). */
 export function withoutPart(tpl, part) {
   const o = []; for (let t = 0; t < tpl.index.length; t += 3) if (tpl.part[tpl.index[t]] !== part) o.push(tpl.index[t], tpl.index[t + 1], tpl.index[t + 2]);
+  return Uint16Array.from(o);
+}
+/** A bodice template's triangles less those of some parts. */
+export function withoutParts(tpl, parts) {
+  const o = []; for (let t = 0; t < tpl.index.length; t += 3) if (!parts.includes(tpl.part[tpl.index[t]])) o.push(tpl.index[t], tpl.index[t + 1], tpl.index[t + 2]);
   return Uint16Array.from(o);
 }
 export function indexWithout(hidden) {
@@ -333,12 +367,14 @@ const meanReduced = (base) => { let p = meanReducedBodies.get(base); if (!p) mea
 /** The static layout of an outfit's class mesh at a tier ("near", "reduced" for mid, "far"), as described at the top of this file. Cached by outfit, tier and skirt profile. */
 export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
   if (!PROFILES[tier]) throw new Error("outfitLayout: tier " + tier);
-  const prof = { ...PROFILES[tier], ...opts }, key = `${outfit.id}|${tier}|${prof.rings}|${prof.around}`;
+  const fitted = FIT.on && !!outfit.cuts[0].fit, prof = { ...PROFILES[tier], ...opts }, key = `${outfit.id}|${tier}|${prof.rings}|${prof.around}${fitted ? "|fit" : ""}`;
   let L = layouts.get(key); if (L) return L;
-  const near = tier === "near", body = near ? NEAR : MID, bodyV = body.V, base = BASE_CUT[outfit.cuts[0].bodice], tpl = near ? templateFor(base) : reducedTemplateFor(base), bodiceV = tpl.V, { rings, around } = prof, tubes = outfit.loose.tubes ?? 1, apron = apronOf(outfit, rings, around, tier), skirtV = tubes * rings * around + (apron ? apron.dup.size + apron.bare.size : 0), V = bodyV + bodiceV + skirtV;
+  const near = tier === "near", body = near ? NEAR : MID, bodyV = body.V, base = BASE_CUT[fitted ? outfit.cuts[0].fit.bodice : outfit.cuts[0].bodice], tpl = near ? templateFor(base) : reducedTemplateFor(base), bodiceV = tpl.V, { rings, around } = prof, tubes = outfit.loose.tubes ?? 1, apron = apronOf(outfit, rings, around, tier), skirtV = tubes * rings * around + (apron ? apron.dup.size + apron.bare.size : 0), V = bodyV + bodiceV + skirtV;
   const skinIndex = new Uint16Array(V * K), skinWeight = new Float32Array(V * K), paint = new Float32Array(V * 4), skirtRC = new Float32Array(V * 3);
   skinIndex.set(body.skinIndex); skinWeight.set(body.skinWeight); paint.set(body.paint);
   skinIndex.set(tpl.skin.skinIndex, bodyV * K); skinWeight.set(tpl.skin.skinWeight, bodyV * K);
+  // where each bodice vertex is on its part (the share along it, ring 0 to the last, the share round it, and the part): what the folds' shading reads (folds.js)
+  for (let p = 0; p < tpl.grids.length; p++) { const g = tpl.grids[p]; if (!g) continue; for (let r = 0; r < g.rings; r++) for (let m = 0; m < g.around; m++) { const v = bodyV + g.start + r * g.around + m; skirtRC[3 * v] = g.rings > 1 ? r / (g.rings - 1) : 0; skirtRC[3 * v + 1] = m / g.around; skirtRC[3 * v + 2] = p; } }
   // the painted pieces (outfit.painted): the feet in shoes (kind 5, a colour of the outfit's own) and the legs in stockings (kind 6, the person's: agent texel 6), on the body's and the layer's vertices
   // that are a leg's (their weights on the thigh, shin, foot or toe bones): static attributes of the class mesh, as the shift's edge is
   if (outfit.painted) {
@@ -397,7 +433,7 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
     for (let i = 0; i < apron.dup.size; i++) put(bodyV + bodiceV + tubeV + i);
     for (let k = apron.r0; k <= apron.r1; k++) for (let j = -apron.h; j <= apron.h; j++) if (!apron.dup.has(apron.id(k, j))) put(bodyV + bodiceV + apron.id(k, j));
   }
-  const hidden = near ? null : hiddenReduced(outfit), bodyIndex = { all: body.index, cut: near ? body.index : indexWithout(hidden) }, skirtIdx = (() => { const one = skirtIndexFor(rings, around, apron), o = new Uint16Array(one.length * tubes); for (let t = 0; t < tubes; t++) for (let q = 0; q < one.length; q++) o[t * one.length + q] = one[q] + (one[q] >= rings * around ? 0 : t * rings * around); return o; })(), cache = new Map();
+  const hidden = near ? null : hiddenReduced(outfit), bodyIndex = { all: body.index, cut: near ? body.index : indexWithout(hidden) }, under = near && fitted ? hiddenUnderFitted(tpl, base) : null, skirtIdx = (() => { const one = skirtIndexFor(rings, around, apron), o = new Uint16Array(one.length * tubes); for (let t = 0; t < tubes; t++) for (let q = 0; q < one.length; q++) o[t * one.length + q] = one[q] + (one[q] >= rings * around ? 0 : t * rings * around); return o; })(), cache = new Map();
   // the apron off: the same skirt on the bare copies (tubes: one, the only outfit with an apron)
   const skirtBare = apron ? skirtIndexFor(rings, around, apron, true) : null;
   L = {
@@ -405,8 +441,10 @@ export function outfitLayout(outfit = GENTLEWOMAN, tier = "near", opts = {}) {
     ranges: { body: [0, bodyV], bodice: [bodyV, bodyV + bodiceV], skirt: [bodyV + bodiceV, V] },
     indexFor(mask) {
       let i = cache.get(mask); if (i) return i;
-      const b = mask & 1 ? bodyIndex.cut : bodyIndex.all, parts = [b];
-      if (mask & 1) parts.push(Uint16Array.from(mask & 4 ? withoutPart(tpl, 3) : tpl.index, (x) => x + bodyV));          // bit 2 (4): the neckwear (part 3, the falling band or the neckerchief) off
+      // (the fitted clothes at near: the body and the base layer under the doublet's torso and the breeches are not drawn, so neither shows through the closer cloth)
+      const b = under && mask & 3 ? indexUnder(body.index, under, mask) : mask & 1 ? bodyIndex.cut : bodyIndex.all, parts = [b];
+      // (the fitted clothes at near: the shirt's upper sleeves, parts 5 and 6, are all under the doublet's sleeves, the forearm's piece reaching up under its end, so they are not drawn either)
+      if (mask & 1) parts.push(Uint16Array.from(under ? withoutParts(tpl, mask & 4 ? [3, 5, 6] : [5, 6]) : mask & 4 ? withoutPart(tpl, 3) : tpl.index, (x) => x + bodyV));          // bit 2 (4): the neckwear (part 3, the falling band or the neckerchief) off
       if (mask & 2) parts.push(Uint16Array.from(mask & 8 && skirtBare ? skirtBare : skirtIdx, (x) => x + bodyV + bodiceV));          // bit 3 (8): the apron off
       i = new Uint16Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { i.set(p, o); o += p.length; }
       cache.set(mask, i); return i;

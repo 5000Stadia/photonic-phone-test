@@ -73,6 +73,20 @@ CUTS.wman = {
   shirtSleeve: { rings: 8, upperRings: 4, from: 0.55, to: 0.97, above: 0.10, puff: 0.008, ease: 0.006, upperEase: 0.006, cuff: 0.004 },
 };
 CUTS.wboy = { ...CUTS.wman, ease: 0.0095, hemAbove: -0.038 };
+// wman-fit, wboy-fit: the working doublet cut close (round 3 of the hero study; tried on the hero's page first, garments/outfit.js setFit). The working doublet stood 3.0 to 3.3 cm off
+// his skin at the chest and waist (19 to 21 cm of ease round), its skirts 6 to 7 cm off his hips (flared over breeches that stood 6 to 8 cm off) and its sleeve cap 4 cm; a period
+// doublet kept its shape by stiffening and a snug cut, not by volume (V&A O110590, a plain wool doublet with a stiffened lining and pasteboard belly pieces), and its ease is
+// read as 4 to 8 cm round the chest (an inference: no surviving measure says it). Here: the torso over the shirt, its front a little flattened (the stiffened belly), the skirts
+// just clearing the fitted breeches, the sleeves close with a little room at the cap, and the shirt's sleeves full but gathered at the wrist.
+// Seated with the hands on the thighs (round 3's first seated shots) the close cut let the shoulder through at the junction of the torso and the sleeve's cap (4 cm) and the
+// shirt's sleeve through the doublet's at the shoulder and the elbow (2 cm): the shirt's sleeve now moves as the arm's skin does to below the elbow (shirtBody), its forearm piece
+// reaching only 5% of the upper arm up under the doublet's sleeve (`above`), and the near class leaves out the body within 0.6% of the height outside the torso or a sleeve at
+// the template, an arm's under the torso too (fitHide: bodice.js hidesNear), and the shirt's upper sleeves (reduced.js): 7 mm at the most seated, nothing walking. The cap then
+// needs little lift (capLift 0.4%, the seated shots' 0.8% stood the shoulder up like a pad), but its top must stay where it is (sleeveTop): set lower, the shoulder came
+// through, 5 cm seated.
+CUTS["wman-fit"] = { ...CUTS.wman, ease: 0.0015, flatten: 0.35, flare: 0.012, flareFrom: 0.030, flareDepth: 0.080, sleeveEase: 0.0055, capLift: 0.004, sleevePuff: 0, band: { ...CUTS.wman.band, lift: 0.008 },
+  shirtSleeve: { ...CUTS.wman.shirtSleeve, puff: 0.007, ease: 0.0035, upperEase: 0.0035, cuff: -0.002, above: 0.05 }, shirtBody: true, fitHide: { outside: 0.006 } };
+CUTS["wboy-fit"] = { ...CUTS["wman-fit"], ease: 0.0015, hemAbove: -0.038 };
 
 // The reduced cuts (R5, mid and far tiers; reduced.js): the same generator at lower resolution (24 round, 8 rings, sleeves 12 x 6: 336 vertices; fewer sleeve rings or columns put the sleeve cap 2 to 3 cm off the full one, which the far check measures), cut on the cut's own mean body
 // and bound to the reduced mesh. The skin smoothing runs fewer rounds, for the rings are further apart.
@@ -80,7 +94,7 @@ CUTS.wboy = { ...CUTS.wman, ease: 0.0095, hemAbove: -0.038 };
 // relax() and the lighting see: the reduced cuts wind it outward. Setting it on the full cuts too is one line, and changes the sweep's numbers for the right sleeve.)
 for (const id of ["adult", "girl", "small"]) CUTS[id + "-r"] = { ...CUTS[id], rightSleeveOut: true, refRings: CUTS[id].rings, N: 24, rings: 8, sleeveN: 12, sleeveRings: 6, skinSmooth: 14 };
 // (the gentleman's reduced cuts keep the full cut's rings: a doublet is a close fit from the neck to the hem, and a sleeve nearly to the elbow, which fewer rings cut across)
-for (const id of ["man", "boy", "wwoman", "wgirl", "wsmall", "wman", "wboy"]) CUTS[id + "-r"] = { ...CUTS[id], N: 24, sleeveN: 12, skinSmooth: 14, relaxIters: 3, ease: CUTS[id].ease + 0.003 };
+for (const id of ["man", "boy", "wwoman", "wgirl", "wsmall", "wman", "wboy", "wman-fit", "wboy-fit"]) CUTS[id + "-r"] = { ...CUTS[id], N: 24, sleeveN: 12, skinSmooth: 14, relaxIters: 3, ease: CUTS[id].ease + 0.003 };
 
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -256,6 +270,16 @@ export function bodiceSkin(g, binding, w, lm, cut) {
     // which stands off it far enough to hold it (cut.capPuff).
     const S = SIDE_OF[g.part[v]] > 0 ? "L" : "R", ju = w.J[BI["upperarm" + S]], jf = w.J[BI["forearm" + S]], axis = [jf[0] - ju[0], jf[1] - ju[1], jf[2] - ju[2]], al = Math.hypot(...axis);
     const s = ((g.pos[3 * v] - ju[0]) * axis[0] + (g.pos[3 * v + 1] - ju[1]) * axis[1] + (g.pos[3 * v + 2] - ju[2]) * axis[2]) / al, lam = cut.capArm + (1 - cut.capArm) * smooth(0, cut.capSew * lm.H, s);
+    // (a close doublet, cut.shirtBody: the shirt's sleeve under it moves as the arm's skin does, as the doublet's sleeve over it does, to a little below the elbow, and rigid on the forearm
+    // from there to the wrist: rigid all along, it came out through the close sleeve at the shoulder and the elbow wherever the arm bent, 2 cm seated with the hands on the thighs)
+    if (g.part[v] >= 5 && cut.shirtBody) {
+      const wb = 1 - smooth(al - 0.01 * lm.H, al + 0.04 * lm.H, s), fore = BI["forearm" + S], acc = new Map();
+      for (let k = 0; k < K; k++) { const wt = bs.skinWeight[v * K + k]; if (wt > 0) { const bn = bs.skinIndex[v * K + k]; acc.set(bn, (acc.get(bn) ?? 0) + wb * wt); } }
+      if (wb < 1) acc.set(fore, (acc.get(fore) ?? 0) + 1 - wb);
+      const top = [...acc].filter(([, x]) => x > 0).sort((p, q) => q[1] - p[1] || p[0] - q[0]).slice(0, K); let sum = 0; for (const [, x] of top) sum += x;
+      for (let k = 0; k < K; k++) { si[v * K + k] = top[k]?.[0] ?? 0; sw[v * K + k] = top[k] ? top[k][1] / sum : 0; }
+      continue;
+    }
     if (g.part[v] >= 5) { si[v * K] = BI[(g.part[v] >= 7 ? "forearm" : "upperarm") + S]; sw[v * K] = 1; for (let k = 1; k < K; k++) { si[v * K + k] = 0; sw[v * K + k] = 0; } continue; }          // the shirt's sleeves: rigid, the upper arm's and the forearm's
     const acc = new Map([[BI.chest, 1 - lam]]);
     for (let k = 0; k < K; k++) { const wt = bs.skinWeight[v * K + k]; if (wt > 0) { const bn = bs.skinIndex[v * K + k]; acc.set(bn, (acc.get(bn) ?? 0) + lam * wt); } }
@@ -300,7 +324,7 @@ export function bindParts(g, w) {
  *  torso, 2 and 3 the sleeves), the vertices lying inside the shell and clear of its open edges by a ring, so no hole opens where it ends. The base
  *  layer is never hidden (nobody is drawn unclothed). `reduced(RED)` gives the same for the 1.5k mesh: a reduced vertex is hidden when the three body
  *  vertices it is bound to all are. */
-export function hiddenBody(g, w, H, maxDist = 0.05, margin = 0.011, from = 0, to = NBODY, outside = 0, nparts = 3) {
+export function hiddenBody(g, w, H, maxDist = 0.05, margin = 0.011, from = 0, to = NBODY, outside = 0, nparts = 3, armTorso = false) {
   const P = g.pos, region = new Uint8Array(to - from), mask = new Uint16Array(to - from);
   const rim = [], parts = Array.from({ length: nparts }, (_, p) => p).map((p) => {
     const idx = []; for (let t = 0; t < g.index.length; t += 3) if (g.part[g.index[t]] === p) idx.push(g.index[t], g.index[t + 1], g.index[t + 2]);
@@ -323,7 +347,7 @@ export function hiddenBody(g, w, H, maxDist = 0.05, margin = 0.011, from = 0, to
     if (!w.trunk[v]) continue;                                    // the neck and head, the forearm and hand beside the waist, the legs (the skirt's) are not under the bodice
     const x = w.pos[3 * v], y = w.pos[3 * v + 1], z = w.pos[3 * v + 2];
     for (let p = 0; p < nparts; p++) {
-      if (w.arm[v] && p === 0) continue;                        // an upper arm beside the ribs is the arm's, not the torso piece's: it moves away from it in a walk
+      if (w.arm[v] && p === 0 && !armTorso) continue;                        // an upper arm beside the ribs is the arm's, not the torso piece's: it moves away from it in a walk
       const { grid, fn, rim } = parts[p], h = grid.nearest(x, y, z, maxDist * (H / 1.62)); if (!h) continue;
       const t = h.tri * 3, s = (x - h.q[0]) * fn[t] + (y - h.q[1]) * fn[t + 1] + (z - h.q[2]) * fn[t + 2];
       if (s >= outside || rimDist2(rim, h.q[0], h.q[1], h.q[2]) < m2) continue;                  // inside the piece, or no more than `outside` out of it
@@ -361,10 +385,14 @@ export function bodiceTemplate(near, cutName = "adult") {
   const binding = bindParts(g, w);
   const skin = bodiceSkin(g, binding, w, lm, cut);
   const hides = hiddenBody(g, w, H);
+  // what a close cut leaves out of the near class's body (garments/reduced.js hiddenUnderFitted; cut.fitHide): as `hides`, but a vertex up to `outside` out of a piece at the template
+  // counts as under it, and an arm's vertex under the torso piece too (the shoulder at the junction of the torso and the sleeve's cap, and the front of the armpit: drawn, they came
+  // through the close doublet as the arms came forward, 2 to 4 cm seated with the hands on the thighs, and showed in slivers standing)
+  const hidesNear = cut.fitHide ? hiddenBody(g, w, H, 0.05, 0.011, 0, NBODY, cut.fitHide.outside * H, 3, true) : null;
   // what the shell covers at the template, clear of its open edges by 35 mm (a vertex nearer a rim is the rim's question: it moves in and out of the edge with the body's build):
   // the sweep measures penetration over these, the body's and the base layer's, in each person's fitted garment (rest and poses)
   const np = cut.doublet ? 9 : 3, covers = { body: hiddenBody(g, w, H, 0.06, 0.035, 0, NBODY, 0, np).mask, layer: hiddenBody(g, w, H, 0.06, 0.035, NBODY, NFULL, 0, np).mask };      // bit p set: part p covers it
-  return { cut, cutName, V: g.pos.length / 3, grids: g.grids, index: g.index, part: g.part, ring: g.ring, edge: g.edge, binding, skin, hides, covers, lm, pos: g.pos, templateH: H, templateWearer: w, ref: shoulderRef(w, H) };
+  return { cut, cutName, V: g.pos.length / 3, grids: g.grids, index: g.index, part: g.part, ring: g.ring, edge: g.edge, binding, skin, hides, hidesNear, covers, lm, pos: g.pos, templateH: H, templateWearer: w, ref: shoulderRef(w, H) };
 }
 /** What pinShoulders needs of the template's own body: its height and the two shoulder joints (the upper arms'). */
 export const shoulderRef = (w, H) => ({ H, L: Array.from(w.J[BI.upperarmL]), R: Array.from(w.J[BI.upperarmR]), hips: Array.from(w.J[BI.hips]) });

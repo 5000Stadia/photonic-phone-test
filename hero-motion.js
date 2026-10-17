@@ -15,7 +15,7 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { makePeople } from "./people/index.js";
-import { WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN } from "./people/garments/outfit.js";
+import { WORKMAN, GENTLEMAN, GENTLEWOMAN, WORKWOMAN, setFit } from "./people/garments/outfit.js";
 import { loadSitting, makeSitting, fittingSeatHeight, sitFrame } from "./people/sitting.js";
 import { skinColour } from "./people/shape.js";
 import { CLIPS, IDLE, CAPTURE, IDLE_CAPTURE } from "./people/mocap.js";
@@ -55,6 +55,10 @@ function size() { const w = stageEl.clientWidth, h = stageEl.clientHeight; rende
 new ResizeObserver(size).observe(stageEl); size();
 
 // ---- the hero and his chair ----
+// Cut: the working clothes cut to his body (round 3: garments/outfit.js setFit, the fitted doublet and breeches), or ?fit=0 the crowd's cut, for comparison (a reload: the
+// draw builds a class's mesh once)
+const fitted = q.get("fit") !== "0";
+setFit(fitted);
 const cast = castOf(), who = cast.find((c) => c.id === HERO);
 const basis = loadBasis(await (await fetch(new URL(BASIS_URL, import.meta.url))).json());
 const people = makePeople(THREE, { basis, thresholds: { near: 400, mid: 800 }, nearCapacity: 4, capacity: 8, exactArms: true, easeWalks: true, review: true,
@@ -312,6 +316,11 @@ function setArms(on) {
   say((on ? "A chair with arms: his hands go to the armrests as he sits, rest on them, and push on them to rise, as the captured sitter's did." : "A chair without arms: his hands brace on his own thighs as he sits and rises, and rest on them seated.") + (seated ? " (From his next sit.)" : ""));
 }
 chairButtons[armsOn ? "arms" : "none"].classList.add("on");
+// ---- the cut: fitted (the default here) or the crowd's (a reload, keeping the rest of the address) ----
+for (const [label, on] of [["Fitted cut", true], ["Crowd's cut", false]]) {
+  const b = mk("body", label, () => { const u = new URL(location.href); u.searchParams.set("fit", on ? "1" : "0"); if (clothes === "nude") u.searchParams.set("body", "dressed"); location.href = u.href; }, on ? "the working clothes cut to his body" : "the clothes as the crowd wears them now");
+  b.classList.toggle("on", on === fitted);
+}
 
 // ---- the loop ----
 let t = 0, last = performance.now(), frames = 0, since = last, fps = 0, label = "";

@@ -35,6 +35,7 @@ import { applySurface } from "./surface.js";
 import { surfaceData } from "./surface-data.js";
 import { makeContactShadow } from "./contact-shadow.js";
 import { makeHairDraw } from "./hair-draw.js";
+import { foldNodes } from "./folds.js";
 import { hairRegion } from "./hair.js";
 import { Fn, If, texture, textureLoad, uniform, ivec2, int, float, vec2, vec3, vec4, attribute, instanceIndex, vertexIndex, positionLocal, normalLocal, cos, sin, varying, cross, mix, step, select } from "three/tsl";
 import * as TSL from "three/tsl";
@@ -326,7 +327,9 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
     const upperSurface = outfit ? textureLoad(agentTex, ivec2(2, i)).w : float(0);
     const lowerSurface = outfit ? textureLoad(agentTex, ivec2(6, i)).w : float(0);
     const fabric = varying(select(paint.w.equal(3), upperSurface, select(paint.w.equal(4).or(paint.w.equal(7)), lowerSurface, float(0))));
-    applySurface(THREE, m, { tier, quality, point: surfacePoint, kind, fabric });
+    // the review page's folds and gathers on the clothes (folds.js), near only: where the fragment is on its garment and how the leg is bent, set per vertex below
+    const foldA = review && outfit && tier === "near" ? TSL.varyingProperty("vec4", `foldA_${tier}`) : null, foldB = foldA ? TSL.varyingProperty("vec2", `foldB_${tier}`) : null;
+    applySurface(THREE, m, { tier, quality, point: surfacePoint, kind, fabric, fold: foldA ? foldNodes(TSL, foldA, foldB) : null });
     const walk = walkNode();
     const gstore = outfit ? garmentStore(e.kind) : null;
     const skirt = outfit ? skirtOf(e.shared) : null;           // every dressed class's program has the skirt's branch; the classes without the skirt worn have no skirt vertices in their index
@@ -379,10 +382,15 @@ export function makeDraw(THREE, { capacity = 1024, exactCapacity = 160, nearCapa
       else {
         // (the body and the bodice are skinned by the same bones: the skin is built once, after the shape is chosen)
         const rc = attribute("skirtRC", "vec4");          // ring, column, tube, and the vertex's part: 0 the body, 1 the bodice, 2 the skirt
-        If(rc.w.lessThan(1.5), () => { If(rc.w.lessThan(0.5), () => { bodyPath(); }).Else(() => { bodicePath(); }); skin(); })
+        If(rc.w.lessThan(1.5), () => {
+          If(rc.w.lessThan(0.5), () => { bodyPath(); if (foldA) { foldA.assign(vec4(0, 1, 0, -1)); foldB.assign(vec2(0, 0)); } })
+            .Else(() => { bodicePath(); if (foldA) { const a = rc.y.mul(2 * Math.PI); foldA.assign(vec4(rc.x, cos(a), sin(a), rc.z)); foldB.assign(vec2(0, 0)); } });
+          skin();
+        })
           .Else(() => {
             const s = skirt.vertex({ instance: i, ring: int(rc.x), col: int(rc.y), tube: int(rc.z) });
             p.assign(s.position); n.assign(s.normal);
+            if (foldA) { const a = rc.y.div(40).mul(2 * Math.PI); foldA.assign(vec4(rc.x, cos(a), sin(a), rc.z.add(100))); foldB.assign(vec2(s.knee, s.hip)); }          // (near: 40 columns)
           });
       }
       // Person-local coordinates: texture detail moves with the person, never the stage.

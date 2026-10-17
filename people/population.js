@@ -745,8 +745,10 @@ export function makePopulation({ ctx = {}, basis, walk = "mocap", thresholds = D
   function tick(t, dt, cam) {
     const out = { near: [], mid: [], far: [], visited: 0 };
     clock += dt; frameNo++;
-    // routes being searched, within a node budget shared round-robin
-    for (let budget = planBudget, k = 0; planners.length && budget > 0 && k < planners.length * 2; k++) {
+    // routes being searched, within a node budget shared round-robin, and within ctx.budgetMs when the host grants
+    // time (holo-emitter's frame ledger: 0 on a starved frame, when nobody searches and those waiting stand on)
+    const grant = Number.isFinite(ctx.budgetMs) ? ctx.budgetMs : Infinity, until = grant < Infinity ? performance.now() + grant : Infinity;
+    for (let budget = planBudget, k = 0; grant > 0 && planners.length && budget > 0 && k < planners.length * 2 && (until === Infinity || performance.now() < until); k++) {
       const pl = planners.shift(), slice = Math.max(1, Math.floor(budget / (planners.length + 1)));
       budget -= slice;
       if (pl.rec.doing?.token !== pl.token || !people.has(pl.rec.id)) continue;   // superseded or removed

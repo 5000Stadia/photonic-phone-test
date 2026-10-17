@@ -27,6 +27,23 @@ export const RINGS = 16, AROUND = 40;
 export const SEAT_EASE = 0.025, SEAT_EASE_FROM = 1;
 export const seatEaseRing = (k) => 1 - smooth(R_HIP + SEAT_EASE_FROM, R_KNEE, k);
 export const seatEase = (H, flex, k) => SEAT_EASE * H * flex * seatEaseRing(k);
+// Fitted breeches (a cut with `fit`, spec.fitted) ease out behind instead, as far as the tube's own hip is bent, seated or not: cut to the body standing and striding, they
+// stood clear of the thigh's front seated (the legs came out nowhere there with no seat ease at all), but the buttock, pulled out as the hip bends, came 19 mm out behind at
+// the start of 113_15's sit-down, 27 seated and 72 at its deepest bend (the hero; tools: clothes-ease.mjs). The ease is this share of the height for each unit of
+// (1 - cos) of the hip's bend past SEAT_BACK_FROM (about 32 degrees, past a stride's), on the rings of the seat ease, the back half only (cos^2 of the column's angle there):
+// 15 mm seated on the hero, 80 at the deepest bend, nothing in a walk. The crowd's uniform seat ease (all round, by the knees' bend) stood the seated lap 5 cm off
+// the thigh's top and the waistband 4 cm off the belly, out through the doublet's skirts.
+export const SEAT_BACK = 0.043, SEAT_BACK_FROM = 0.15;
+// (the waistband's top rings, under the doublet's skirts, ease out only past 0.4, about 53 degrees: seated they stay inside the doublet; in the sit-down's deep bend the lower
+// back comes out behind the doublet's skirts, and the waistband goes out over it. From 0.55 the lower back showed 19 mm early in the sit-down, from 0.3 the waistband came 5 mm
+// through the doublet seated.)
+export const seatBackFrom = (k) => SEAT_BACK_FROM + (0.4 - SEAT_BACK_FROM) * (1 - smooth(0.5, 2, k));
+export const seatBack = (H, hip, k, cs) => (cs < 0 ? SEAT_BACK * H * Math.max(0, hip - seatBackFrom(k)) * seatEaseRing(k) * cs * cs : 0);
+// The fitted breeches' knee band turns from the thigh toward the shin as the knee bends (rings 13 to 15, these shares of the way), and its last ring sits on the shin,
+// `drop` below the knee: the band is tied round the leg under the knee, so seated it hugs the top of the shin and the cloth goes over the knee. Along the thigh, as the
+// crowd's cut has it, the tube ran on past a bent knee and ended in an open pipe in front of it (the stocking's knee seen inside it), and the kneecap came 26 mm out
+// of the band's front in a stride.
+export const KNEE_TURN = [0.3, 0.6, 0.95];
 const AROUND_DEFAULT = AROUND, BRIDGE_GAIN = 0.7;                 // 640 vertices
 export const R_WAIST = 0, R_HIP = 4, R_KNEE = 9, R_ANKLE = 14, R_HEM = 15;
 export const SKIRT_V = RINGS * AROUND;
@@ -71,6 +88,18 @@ SKIRTS.workgirl = { ...SKIRTS.girl, hem: { side: 0.25, front: 0.25, back: 0.26 }
 SKIRTS.worksmall = { ...SKIRTS.small, hem: { side: 0.30, front: 0.30, back: 0.31 }, bell: 0.8, hemClear: 0.040 };
 // closed: the working man's breeches, the gentleman's divided machinery with the petticoat's fullness taken out: a close fit with a little ease at the seat, ending just below the knee (the band's rings are painted a shade darker, outfit.painted.band) and gathered close to it (no ribbon, no bag).
 SKIRTS.closed = { ...SKIRTS.breeches, bellyAbs: 0.060, ease: 0.034, roll: { side: 0.025, back: 0.050, front: 0.020 }, hemEase: 0.004, bag: 0.002, drop: 0.032 };
+// closed-fit: the same breeches cut to the wearer (fitRings), tried first on the hero's page (garments/outfit.js setFit); `exact`: there is no table for it, its spec is the wearer's own
+// (tables.js). The ease, a share of the height at ring k (0 the waistband, 4 the hips, 9 mid-thigh, 14 the knee band), front, back and sides: close at the waistband (gathered into
+// it over the shirt), the seat's fullness behind (3 cm on a man of 1.78 m), the thigh's 2 to 2.5, a little more above the knee where the gathered cloth blouses over the band, and
+// the band close round the leg (0.6 cm).
+// The waistband's back (rings 0 to 2) is under the doublet's skirts, which follow the body there more closely than half-ellipses can (the small of the back is hollow): it
+// is cut 0.2% of the height inside the body's reach there, so the doublet stays outside it (at 0.45% out it came through the doublet's back, 12 mm walking and 25 seated); the
+// body under it is not drawn. Its front keeps its ease: a round belly comes out below the doublet's hem, and the waistband must hold it.
+SKIRTS["closed-fit"] = { ...SKIRTS.closed, exact: true, fit: {
+  front: [[0, 0.0045], [3, 0.0045], [5, 0.009], [8, 0.011], [12, 0.013], [14, 0.0035], [15, 0.0035]],
+  back: [[0, -0.002], [2, -0.002], [3.5, 0.006], [5, 0.017], [8, 0.014], [12, 0.008], [14, 0.0035], [15, 0.0035]],
+  side: [[0, 0.002], [2, 0.002], [3.5, 0.004], [5, 0.009], [8, 0.010], [12, 0.010], [14, 0.0035], [15, 0.0035]],          // (less at the sides above the knee: seated the knees read as balls from the front)
+} };
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -102,7 +131,7 @@ function legRadii(w, side) {
 
 /** The skirt of a wearer (shape.js buildNear's result `near`), from their body at rest. `cutName`: SKIRTS key. The spec is plain numbers: the ring radii
  *  (the design profile), the leg radii, and the anchors' rest offsets, so it could be a few uniforms per person. */
-export function skirtSpec(near, cutName = "gentlewoman") {
+export function skirtSpec(near, cutName = "gentlewoman", leg = 0) {
   const c = SKIRTS[cutName], w = readWearer(near), H = near.height, J = w.J, u = H / 1.62;
   const table = torsoTable(w, J[BI.hips][1] - 0.2 * H, J[BI.neck][1], 0.004 * u, 24);        // the skirt reads only the waist and the sides, front and back: a coarse table
   const lm = landmarks(w, table, u);
@@ -157,7 +186,100 @@ export function skirtSpec(near, cutName = "gentlewoman") {
     }
     return r;
   })();
-  return unpackSpec(packSpec({ rs, rf, rb, thigh: radii.thigh, shin: radii.shin, foot, waistRest: A0, hipsJoint: J[BI.hips], spineJoint: J[BI.spine], toeJoint: [J[BI.toeL], J[BI.toeR]], tipToe: [w.tip.toeL, w.tip.toeR], waistY: ws }, 1 / H), H, cutName);
+  const sp = { rs, rf, rb, thigh: radii.thigh, shin: radii.shin, foot, waistRest: A0, hipsJoint: J[BI.hips], spineJoint: J[BI.spine], toeJoint: [J[BI.toeL], J[BI.toeR]], tipToe: [w.tip.toeL, w.tip.toeR], waistY: ws };
+  if (c.fit) fitRings(sp, w, c, H, cutName, near);
+  return unpackSpec(packSpec(sp, 1 / H), H, cutName, leg);
+}
+
+// ---- fitted breeches (round 3 of the hero study; SKIRTS[cut].fit) -------------------------------------------------------------------------------------------------------------
+// Kabe, 2026-10-16: "The clothes still look like colorful trashbags." The closed breeches stood off his thigh 7 to 8 cm at the back of the seat and thigh (about 47 cm of ease
+// round, against a leg of about 55), 4 cm round the knee band, because each ring's design radius ran straight from the hips' reach (the buttocks', round the whole ring) down to
+// the knee's, and the leg capsules the rings rest on are round about the femur at the leg's widest reach (14.5 cm at the top of the thigh, the buttock's). Here each ring is cut to
+// this wearer: the section of the drawn body and its base layer in the ring's own plane at rest, the nearest crossing of each column's ray from the ring's centre, plus the cut's
+// ease there (a share of the height: front, back and sides, ring by ring); the smallest half-ellipses (front and back, the sides shared) that hold every column's target are the
+// ring's radii; and the capsules are held to the leg's narrowest reach, so they no longer set the shape. The fullness of a period pair (V&A O110590: "very full", gathered into the
+// waistband and at the knee) is left to the seat and above the knee band, and to the gathers the shading draws.
+let FIT_TRIS = null;
+// the drawn body and its base layer skinned to a pose (the wearer's pos layout: the body's vertices, then the layer's)
+function skinAll(near, J, bones, out) {
+  const { W, P } = bones, n = out.length / 3, si = near.skinIndex, sw = near.skinWeight, src = near.position;
+  for (let v = 0; v < n; v++) {
+    const px = src[3 * v], py = src[3 * v + 1], pz = src[3 * v + 2]; let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 4; k++) { const wt = sw[4 * v + k]; if (!wt) continue; const b = si[4 * v + k], m = b * 9, j = J[b], dx = px - j[0], dy = py - j[1], dz = pz - j[2];
+      x += wt * (W[m] * dx + W[m + 1] * dy + W[m + 2] * dz + P[3 * b]); y += wt * (W[m + 3] * dx + W[m + 4] * dy + W[m + 5] * dz + P[3 * b + 1]); z += wt * (W[m + 6] * dx + W[m + 7] * dy + W[m + 8] * dz + P[3 * b + 2]); }
+    out[3 * v] = x; out[3 * v + 1] = y; out[3 * v + 2] = z;
+  }
+  return out;
+}
+const REST = (() => { const W = new Float64Array(21 * 9); for (let b = 0; b < 21; b++) W.set([1, 0, 0, 0, 1, 0, 0, 0, 1], b * 9); return W; })();
+/** The ease a fitted cut asks at ring k (a fraction, 0 at the waist ring to 15 at the knee band) and column angle th (0 the front, pi the back), in units of the height. */
+export function fitEase(f, k, th) {
+  const at = (pts) => { if (k <= pts[0][0]) return pts[0][1]; for (let i = 1; i < pts.length; i++) if (k <= pts[i][0]) { const [k0, a] = pts[i - 1], [k1, b] = pts[i], t = (k - k0) / (k1 - k0); return a + (b - a) * t * t * (3 - 2 * t); } return pts[pts.length - 1][1]; };
+  const c = Math.cos(th), s = Math.sin(th), wf = Math.max(0, c) ** 2, wb = Math.max(0, -c) ** 2, ws = s * s;
+  return (wf * at(f.front) + wb * at(f.back) + ws * at(f.side)) / (wf + wb + ws);
+}
+// the rest pose with the left leg swung at the hip (deg, forward positive) and bent at the knee: the stride's reach of the thigh and buttock in the rings' own frames
+function legPose(J, hip, knee) {
+  const W = Float64Array.from(REST), P = new Float64Array(21 * 3); for (let b = 0; b < 21; b++) P.set(J[b], b * 3);
+  const rx = (deg) => { const a = (-deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }, mul = (A, B) => { const o = new Array(9); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j]; return o; };
+  const Wt = rx(hip), Ws = mul(Wt, rx(-knee)), at = (Wm, b, a) => [0, 1, 2].map((r) => Wm[r * 3] * (J[b][0] - J[a][0]) + Wm[r * 3 + 1] * (J[b][1] - J[a][1]) + Wm[r * 3 + 2] * (J[b][2] - J[a][2]) + P[a * 3 + r]);
+  W.set(Wt, BI.thighL * 9); W.set(Ws, BI.shinL * 9); W.set(Ws, BI.footL * 9); W.set(Ws, BI.toeL * 9);
+  P.set(at(Wt, BI.shinL, BI.thighL), BI.shinL * 3); P.set(at(Ws, BI.footL, BI.shinL), BI.footL * 3); P.set(at(Ws, BI.toeL, BI.footL), BI.toeL * 3);
+  return { W, P };
+}
+function fitRings(sp, w, c, H, cutName, near) {
+  const J = w.J, f = c.fit;
+  const spec = unpackSpec(packSpec(sp, 1 / H), H, cutName, 1);
+  FIT_TRIS ??= trianglesWhere((v) => !w.arm[v]);
+  // the nearest crossing of the ray from (0, 0) along (x, y) in the plane's coordinates, among the segments (4 numbers each)
+  const cross = (seg, x, y) => { let best = Infinity; for (let i = 0; i < seg.length; i += 4) { const ax = seg[i], ay = seg[i + 1], bx = seg[i + 2] - ax, by = seg[i + 3] - ay, den = x * by - y * bx; if (Math.abs(den) < 1e-12) continue; const sR = (ax * by - ay * bx) / den, t = (ax * y - ay * x) / den; if (sR > 1e-4 && t >= 0 && t <= 1 && sR < best) best = sR; } return best; };
+  // the body's reach along each ring's columns, the most of: standing, and the stride's two ends (the thigh 30 degrees forward with the knee bent 25, and 15 back): the
+  // buttock's fold moves with the hip, and a ring cut to the standing body alone let it out 14 mm walking. Each pose's body is skinned (the body and its base layer).
+  const reach = new Float64Array(RINGS * AROUND).fill(NaN), pos = new Float32Array(w.pos.length);
+  for (const [hip, knee] of [[0, 0], [30, 25], [-15, 5]]) {
+    const bones = hip || knee ? legPose(J, hip, knee) : { W: REST, P: (() => { const P = new Float64Array(63); for (let b = 0; b < 21; b++) P.set(J[b], b * 3); return P; })() };
+    const pp = hip || knee ? skinAll(near, J, bones, pos) : w.pos;
+    ringFrames(spec, bones, { floor: 0, phase: 0, sway: 0 });
+    for (let k = 0; k < RINGS; k++) {
+      const o = [ringC[3 * k], ringC[3 * k + 1], ringC[3 * k + 2]], n = [ringN[3 * k], ringN[3 * k + 1], ringN[3 * k + 2]], fw = [ringF[3 * k], ringF[3 * k + 1], ringF[3 * k + 2]];
+      const l = [fw[1] * n[2] - fw[2] * n[1], fw[2] * n[0] - fw[0] * n[2], fw[0] * n[1] - fw[1] * n[0]], seg = planeSegments(pp, FIT_TRIS, o, n, l, fw);
+      // a tube reaches across the middle of the body only as far as it overlaps the other (3 cm on a man of 1.78 m): the ray toward the other side is cut there, not at the far hip
+      // (the middle: the pelvis's own, x = 0, in every pose here, for only the left leg moves)
+      for (let j = 0; j < AROUND; j++) {
+        const th = (j / AROUND) * 2 * Math.PI, sn = Math.sin(th), cs = Math.cos(th), dx = sn * l[0] + cs * fw[0], toMid = dx * Math.sign(o[0]) < -1e-3 ? Math.abs(o[0] / dx) + 0.017 * H : Infinity;
+        const r = Math.min(cross(seg, sn, cs), toMid), q = k * AROUND + j;
+        if (Number.isFinite(r) && !(reach[q] >= r)) reach[q] = r;
+      }
+    }
+  }
+  const T = new Float64Array(AROUND);
+  for (let k = 0; k < RINGS; k++) {
+    let ok = 0;
+    for (let j = 0; j < AROUND; j++) { const r = reach[k * AROUND + j], th = (j / AROUND) * 2 * Math.PI; T[j] = Number.isFinite(r) ? r + fitEase(f, k, th) * H : NaN; if (Number.isFinite(r)) ok++; }
+    if (ok < AROUND * 0.75) continue;          // (a ring whose centre is not inside the body keeps the profile's radii)
+    // a column whose ray ran out past the leg (through a gap to another part of the body) asks no more than half again the ring's middling reach
+    const fin = Array.from(T).filter(Number.isFinite).sort((x, y) => x - y), cap = 1.5 * fin[fin.length >> 1];
+    for (let j = 0; j < AROUND; j++) if (T[j] > cap) T[j] = cap;
+    // the smallest half-ellipses holding every target: the sides first (a little over the widest sideways reach, so no column asks an endless front or back), then each half
+    let rs = 0; for (let j = 0; j < AROUND; j++) if (Number.isFinite(T[j])) rs = Math.max(rs, T[j] * Math.abs(Math.sin((j / AROUND) * 2 * Math.PI)));
+    rs *= 1.04; let rf = 0, rb = 0;
+    for (let j = 0; j < AROUND; j++) {
+      if (!Number.isFinite(T[j])) continue;
+      const th = (j / AROUND) * 2 * Math.PI, sn = Math.sin(th), cs = Math.cos(th), q = 1 - (T[j] * sn / rs) ** 2, rr = Math.abs(cs) < 1e-6 ? 0 : (T[j] * Math.abs(cs)) / Math.sqrt(Math.max(q, 1e-3));
+      if (cs >= 0) rf = Math.max(rf, rr); else rb = Math.max(rb, rr);
+    }
+    sp.rs[k] = rs; sp.rf[k] = Math.max(rf, 0.3 * rs); sp.rb[k] = Math.max(rb, 0.3 * rs);
+  }
+  // the legs the rings rest on: no longer the leg's widest reach (the buttock's, round the whole of the top of the thigh) but its narrowest, so the fitted radii set the shape
+  for (const [key, a, b] of [["thigh", BI.thighL, BI.shinL], ["shin", BI.shinL, BI.footL]]) {
+    const A = J[a], B = J[b], d = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], L = Math.hypot(...d), u = d.map((x) => x / L);
+    const e1n = [1 - u[0] * u[0], -u[0] * u[1], -u[0] * u[2]], e1l = Math.hypot(...e1n), e1 = e1n.map((x) => x / e1l), e2 = [u[1] * e1[2] - u[2] * e1[1], u[2] * e1[0] - u[0] * e1[2], u[0] * e1[1] - u[1] * e1[0]];
+    sp[key] = Array.from(sp[key], (r0, i) => {
+      const t = [0.08, 0.25, 0.5, 0.75, 0.95][i], seg = planeSegments(w.pos, FIT_TRIS, [A[0] + d[0] * t, A[1] + d[1] * t, A[2] + d[2] * t], u, e1, e2);
+      let m = Infinity; for (let q = 0; q < 24; q++) { const a2 = (q / 24) * 2 * Math.PI; m = Math.min(m, cross(seg, Math.cos(a2), Math.sin(a2))); }
+      return Number.isFinite(m) ? Math.min(r0, m) : r0;
+    });
+  }
 }
 
 // ---- the spec as numbers ----------------------------------------------------------------------------------------------------------
@@ -180,7 +302,7 @@ export function unpackSpec(v, H, cutName = "gentlewoman", leg = 0) {
   const toeJoint = [take(3, Array), take(3, Array)], tipToe = [take(3, Array), take(3, Array)], ws = v[n++] * H;
   return {
     cut: cutName, c, H, u, rs, rf, rb, ring: { s: rs, f: rf, b: rb }, waistRest, hipsJoint, spineJoint, toeJoint, tipToe, thigh, shin, foot,
-    waistSpine: c.waistSpine ?? 0.5, trainTuck: c.trainTuck ?? 0.85, leg, short: c.short ?? 0, kneeShare: c.kneeShare ?? 0.5, drop: (c.drop ?? 0) * H, lateral: c.lateral ?? [0, 0], fall: c.fall ?? 0.02, hemY: c.hemClear * H, legClear: c.legClear * H, sway: c.sway * H, bend: (c.bend ?? 0.075) * H, waistY: ws,
+    waistSpine: c.waistSpine ?? 0.5, trainTuck: c.trainTuck ?? 0.85, leg, short: c.short ?? 0, fitted: c.fit ? 1 : 0, kneeShare: c.kneeShare ?? 0.5, drop: (c.drop ?? 0) * H, lateral: c.lateral ?? [0, 0], fall: c.fall ?? 0.02, hemY: c.hemClear * H, legClear: c.legClear * H, sway: c.sway * H, bend: (c.bend ?? 0.075) * H, waistY: ws,
   };
 }
 
@@ -236,6 +358,9 @@ function ringFrames(spec, bones, ctx) {
   const b3x = lerp(a3x, kx, sh), b3y = lerp(a3y, ky, sh), b3z = lerp(a3z, kz, sh);
   const tdl = Math.sqrt((kx - t0x) ** 2 + (ky - t0y) ** 2 + (kz - t0z) ** 2) || 1, tdx = (kx - t0x) / tdl, tdy = (ky - t0y) / tdl, tdz = (kz - t0z) / tdl;          // down the thigh
   const a4x = lerp(b3x, kx + tdx * spec.drop, sh), a4y = lerp(Math.min(a3y - 0.01 * spec.H, hemY), ky + tdy * spec.drop, sh), a4z = lerp(b3z, kz + tdz * spec.drop, sh);          // a tube goes on a little past the knee along the thigh
+  // (fitted breeches: the knee band turns down the shin, KNEE_TURN; the shin's direction, the own foot from the own knee)
+  const turn = spec.fitted && sh, ownF = spec.leg < 0 ? fR : fL;
+  let sdx = P3(ownF, 0) - kx, sdy = P3(ownF, 1) - ky, sdz = P3(ownF, 2) - kz; const sdl = Math.sqrt(sdx * sdx + sdy * sdy + sdz * sdz) || 1; sdx /= sdl; sdy /= sdl; sdz /= sdl;
   // heading: the pelvis's forward axis, flat
   mulv(W, hips, 0, 0, 1, tmp, 0);
   let hx = tmp[0], hz = tmp[2]; const hl = Math.sqrt(hx * hx + hz * hz) || 1; hx /= hl; hz /= hl;
@@ -267,6 +392,11 @@ function ringFrames(spec, bones, ctx) {
     const g = smooth(R_KNEE, R_ANKLE, k) * (1 - sh);          // (a tube of the breeches stays across its thigh to the knee band: it hangs on the leg, not from the waist)
     nx = lerp(nx, 0, g); ny = lerp(ny, -1, g); nz = lerp(nz, 0, g);
     let nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+    if (turn && k >= RINGS - KNEE_TURN.length) {
+      const wt = KNEE_TURN[k - RINGS + KNEE_TURN.length];
+      nx = lerp(nx, sdx, wt); ny = lerp(ny, sdy, wt); nz = lerp(nz, sdz, wt); nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      if (k === RINGS - 1) { cx = kx + sdx * spec.drop; cy = ky + sdy * spec.drop; cz = kz + sdz * spec.drop; }
+    }
     // the ring's frame: the pelvis's forward axis carried by the shortest turn of the pelvis's down axis onto the ring's normal (the way a pipe's frame
     // follows its bends), so over the lap the front lies on top of the thighs and under the knee it faces forward again
     const vx = pdy * nz - pdz * ny, vy = pdz * nx - pdx * nz, vz = pdx * ny - pdy * nx, cc = pdx * nx + pdy * ny + pdz * nz, kk = 1 / (1 + cc);
@@ -284,7 +414,7 @@ function ringFrames(spec, bones, ctx) {
     }
     ringC[3 * k] = cx; ringC[3 * k + 1] = cy; ringC[3 * k + 2] = cz; ringN[3 * k] = nx; ringN[3 * k + 1] = ny; ringN[3 * k + 2] = nz; ringF[3 * k] = fx; ringF[3 * k + 1] = fy; ringF[3 * k + 2] = fz;
   }
-  EX[0] = hx; EX[1] = hz; EX[2] = a2x; EX[3] = a2z; EX[4] = a3x; EX[5] = a3z;
+  EX[0] = hx; EX[1] = hz; EX[2] = a2x; EX[3] = a2z; EX[4] = a3x; EX[5] = a3z; EX[6] = 1 - (pdx * tdx + pdy * tdy + pdz * tdz);          // (the tube's own hip's bend, 1 - cos: SEAT_BACK)
 }
 
 /** The skirt's vertices for a pose. bones: { W, P } (world rotations B x 9 and joint positions B x 3, the walker's w.Wm and w.Pm). Fills `out` (RINGS x around x 3; around is
@@ -391,7 +521,7 @@ export function skirtPose(spec, bones, ctx = {}, out = new Float32Array(RINGS * 
     const cx = ringC[3 * k], cy = ringC[3 * k + 1], cz = ringC[3 * k + 2], nx = ringN[3 * k], ny = ringN[3 * k + 1], nz = ringN[3 * k + 2], fx = ringF[3 * k], fy = ringF[3 * k + 1], fz = ringF[3 * k + 2];
     const lx = fy * nz - fz * ny, ly = fz * nx - fx * nz, lz = fx * ny - fy * nx, base = k * AROUND;
     for (let j = 0; j < AROUND; j++) {
-      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND])) + (seat>0 && ctx.seatEdge!==undefined && spec.short ? seatEase(spec.H, flex, k) : 0);          // (the seated ease)
+      const th = (j / AROUND) * p2, sn = Math.sin(th), cs = Math.cos(th), r = Math.max(RAW[base + j], 0.5 * (RAW[base + (j + AROUND - 1) % AROUND] + RAW[base + (j + 1) % AROUND])) + (spec.short ? (spec.fitted ? seatBack(spec.H, EX[6], k, cs) : seat > 0 && ctx.seatEdge !== undefined ? seatEase(spec.H, flex, k) : 0) : 0);          // (the seated ease; fitted breeches: behind, by the hip)
       const o = (base + j) * 3, ux = sn * lx + cs * fx, uy = sn * ly + cs * fy, uz = sn * lz + cs * fz;
       out[o] = cx + r * ux; out[o + 1] = cy + r * uy; out[o + 2] = cz + r * uz;
       UD[o] = ux; UD[o + 1] = uy; UD[o + 2] = uz;

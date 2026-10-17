@@ -8,7 +8,7 @@ export function surfaceNormal(height) {
   return n.mul(det.abs().max(1e-10)).sub(grad).normalize();
 }
 
-export function applySurface(THREE, m, { tier, quality, point, kind, fabric }) {
+export function applySurface(THREE, m, { tier, quality, point, kind, fabric, fold = null }) {
   const k = T.varying(kind), p = point;
   const skin = k.lessThan(0.5), cloth = k.greaterThan(0.5).and(k.lessThan(1.5)).or(k.greaterThan(2.5));
   const f = fabric.floor(), wear = fabric.fract().mul(10);
@@ -42,7 +42,9 @@ export function applySurface(THREE, m, { tier, quality, point, kind, fabric }) {
   // Fade before the weave becomes subpixel, avoiding moire on phone and mid people.
   const visible = T.float(1).sub(T.fwidth(uv).length().smoothstep(0.6, 2.5));
   const weave = uv.x.sin().mul(uv.y.sin()).mul(T.select(silk, T.float(0.000015), T.float(0.00007))).mul(visible);
-  m.normalNode = surfaceNormal(T.select(cloth, weave, T.float(0)));
+  // (fold: the folds and gathers of folds.js, the review page's for now: a height in metres added to the weave, and a little occlusion in their creases)
+  m.normalNode = surfaceNormal(T.select(cloth, fold ? weave.add(fold.height) : weave, T.float(0)));
+  if (fold) m.aoNode = m.aoNode.mul(T.select(cloth, fold.shade.mul(-0.22).add(1), T.float(1)));
   const detailedSkin = tier === 'near' || quality === 'pc';
   const face = p.y.smoothstep(0.82, 0.9), front = p.z.smoothstep(0, 0.045);
   const cheek = p.x.abs().smoothstep(0.018, 0.035).mul(T.float(1).sub(p.x.abs().smoothstep(0.055, 0.075))).mul(face).mul(front);

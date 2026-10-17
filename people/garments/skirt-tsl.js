@@ -14,13 +14,13 @@ import { walkSample } from '../walk-sample.js';
 //   16 (thigh[0], thigh[4], shin[0], shin[4])   leg radii at the ends of each segment      17 (foot, waistSpine, trainTuck, hemY)       18 (legClear, sway, bend, H)
 //   19 waistRest   20 hipsJoint   21 spineJoint   22 toeJoint L   23 toeJoint R   24 tipToe L   25 tipToe R     (vec3 each, rest pose)
 //   26 thigh L  27 thigh R  28 shin L  29 shin R  30 foot L  31 foot R                                          (rest joints of the bones the legs' capsules hang from)
-//   32 (short, kneeShare, drop, 0)    33 (lateral 0, lateral 1, agent row, leg)      the divided breeches' tube (skirt.js SKIRTS.breeches): short 0 for a skirt, 1 for a tube on one leg, whose path ends at the knee;
+//   32 (short, kneeShare, drop, fitted)    33 (lateral 0, lateral 1, agent row, leg)      the divided breeches' tube (skirt.js SKIRTS.breeches): short 0 for a skirt, 1 for a tube on one leg, whose path ends at the knee;
 //                                     texel 33's (z, w) tag the block: the agent texture's row of the person it belongs to and which tube (leg) it is, so a pass reads its person from its own spec row and
 //                                     one system serves every outfit of a tier (a person taking one block or two; the draw's classes lay their people one after another in the one agent texture)
 // Per-instance data, read from the agent texture (row = instance): texel 0 [x, z, heading, phase], texel 1 [walk slot, ., y, .], texel 4 [., ., ., the person's first block (spec row)].
 // The bones are the walk texture's: per slot, columns F + 1 frames, rows 3 B (affine matrix rows); neighbouring captured poses blend transformed points.
 import { BONES } from "../../body.js";
-import { SEAT_EASE, SEAT_EASE_FROM } from "./skirt.js";
+import { SEAT_EASE, SEAT_EASE_FROM, SEAT_BACK, SEAT_BACK_FROM, KNEE_TURN } from "./skirt.js";
 
 export const RINGS = 16, SPEC_TEXELS = 34;
 const BI = Object.fromEntries(BONES.map(([n], i) => [n, i]));
@@ -37,7 +37,7 @@ export function writeSpecRow(data, row, spec, J, agentRow = 0, leg = 0) {
   put(18, spec.legClear, spec.sway, spec.bend, spec.H);
   put(19, ...spec.waistRest); put(20, ...spec.hipsJoint); put(21, ...spec.spineJoint); put(22, ...spec.toeJoint[0]); put(23, ...spec.toeJoint[1]); put(24, ...spec.tipToe[0]); put(25, ...spec.tipToe[1]);
   put(26, ...J[BI.thighL]); put(27, ...J[BI.thighR]); put(28, ...J[BI.shinL]); put(29, ...J[BI.shinR]); put(30, ...J[BI.footL]); put(31, ...J[BI.footR]);
-  put(32, spec.short ?? 0, spec.kneeShare ?? 0.5, spec.drop ?? 0); put(33, spec.lateral?.[0] ?? 0, spec.lateral?.[1] ?? 0, agentRow, leg);
+  put(32, spec.short ?? 0, spec.kneeShare ?? 0.5, spec.drop ?? 0, spec.fitted ?? 0); put(33, spec.lateral?.[0] ?? 0, spec.lateral?.[1] ?? 0, agentRow, leg);
 }
 
 /**
@@ -94,6 +94,8 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const b0v = a0v.add(dl.mul(s33.x).mul(shrt)).toVar(), b1v = a1v.add(dl.mul(s33.y).mul(shrt)).toVar();
     const b2v = mix(a2v, thO.add(kO.sub(thO).mul(s32.y)), shrt).toVar(), b3v = mix(a3v, kO, shrt).toVar();
     const a4v = mix(vec3(a3v.x, min(a3v.y.sub(H.mul(0.01)), hemY), a3v.z), kO.add(td.mul(s32.z)), shrt).toVar();
+    // fitted breeches (s32.w, 1; skirt.js KNEE_TURN, SEAT_BACK): the knee band turns down the shin, and the seat eases out behind by the own hip's bend
+    const fO = mix(fL.P, fR.P, legBit), turn = s32.w.mul(shrt).toVar(), sdir = normalize(fO.sub(kO)).toVar();
     const anc = [b0v, b1v, b2v, b3v, a4v];
     // heading and the pelvis axes
     const pf = hips.rotate(vec3(0, 0, 1)).toVar(), pd = hips.rotate(vec3(0, -1, 0)).toVar();
@@ -132,7 +134,9 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
       }
       const g = smooth(R_KNEE, R_ANKLE, kf).mul(float(1).sub(shrt));          // (a tube of the breeches stays across its thigh)
       nn = vec3(nn.x.mul(float(1).sub(g)), lerp(nn.y, float(-1), g), nn.z.mul(float(1).sub(g)));
-      const n = nn.div(max(sqrt(dot(nn, nn)), 1e-9)).toVar();
+      const n0 = nn.div(max(sqrt(dot(nn, nn)), 1e-9)), wt = select(kf.lessThan(RINGS - KNEE_TURN.length - 0.5), float(0), KNEE_TURN.slice(0, -1).reduceRight((acc, w, i) => select(kf.lessThan(RINGS - KNEE_TURN.length + i + 0.5), float(w), acc), float(KNEE_TURN[KNEE_TURN.length - 1]))).mul(turn);
+      const n = normalize(mix(n0, sdir, wt)).toVar();
+      c = select(turn.greaterThan(0.5).and(kf.greaterThan(RINGS - 1.5)), kO.add(sdir.mul(s32.z)), c).toVar();
       // the ring's frame: the pelvis's forward carried by the shortest turn of its down axis onto the ring's normal
       const v = cross(pd, n).toVar(), cc = dot(pd, n), kk = float(1).div(float(1).add(cc));
       let f = pf.add(cross(v, pf)).add(cross(v, cross(v, pf)).mul(kk));
@@ -144,7 +148,11 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
       c = vec3(c.x.add(sa.mul(s1.mul(hx).mul(0.7).add(s2.mul(lat.x).mul(0.8)))), c.y, c.z.add(sa.mul(s1.mul(hz).mul(0.7).add(s2.mul(lat.z).mul(0.8)))));
       return { c: c.toVar(), n, f };
     }
-    return { row, srow, phase, S, ring, caps, flex, clear, tuck, hemY, H, a0, a1, shrt };
+    // the tube's own leg, bent at the knee and at the hip (0 straight to 1 at a right angle): what the folds' shading reads (folds.js)
+    const kx = kO.sub(thO), ky = fO.sub(kO);
+    const ownKnee = smooth(0.12, 0.7, float(1).sub(dot(kx, ky).div(max(sqrt(dot(kx, kx)), 1e-6).mul(max(sqrt(dot(ky, ky)), 1e-6))))), ownHip = smooth(0.12, 0.8, float(1).sub(dot(pd, td)));
+    const hipBend = float(1).sub(dot(pd, td)).toVar();          // (1 - cos, unclamped: SEAT_BACK)
+    return { row, srow, phase, S, ring, caps, flex, clear, tuck, hemY, H, a0, a1, shrt, ownKnee, ownHip, hipBend, turn };
   }
 
   // ---- pass 1: the smoothed radius of (person, ring, column) ----
@@ -212,7 +220,10 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const R0 = [-1, 0, 1].map((d) => max(raw(d).design, need[d + 1]).toVar());
     // breeches on a seat ease out round the hip and upper thigh as far as the knees are bent (skirt.js SEAT_EASE says why: 2.5% of the height
     // at a right angle, none from the knee band down, none standing)
-    return max(R0[1], R0[0].add(R0[2]).mul(0.5)).add(select(rig.S(0).w.greaterThan(0).and(rig.shrt.greaterThan(.5)),rig.H.mul(SEAT_EASE).mul(rig.flex).mul(float(1).sub(smooth(R_HIP + SEAT_EASE_FROM, R_KNEE, kf))),float(0)));
+    // (fitted breeches: behind, by the tube's own hip, seated or not: skirt.js seatBack)
+    const ringW = float(1).sub(smooth(R_HIP + SEAT_EASE_FROM, R_KNEE, kf)), cs0 = cos(th0), behind = max(cs0.negate(), 0);
+    const back = rig.H.mul(SEAT_BACK).mul(max(rig.hipBend.sub(mix(float(0.4), float(SEAT_BACK_FROM), smooth(0.5, 2, kf))), 0)).mul(ringW).mul(behind).mul(behind);
+    return max(R0[1], R0[0].add(R0[2]).mul(0.5)).add(select(rig.turn.greaterThan(0.5), back, select(rig.S(0).w.greaterThan(0).and(rig.shrt.greaterThan(.5)),rig.H.mul(SEAT_EASE).mul(rig.flex).mul(ringW),float(0))));
   }
 
   // ---- the render-to-texture passes ----
@@ -273,7 +284,7 @@ export function makeSkirtGPU({ THREE, tsl, around = 24, blocks = 64, agent, walk
     const pj1 = posAt(f0, kInt, cInt.add(int(1))), pj0 = posAt(f0, kInt, cInt.sub(int(1))), pk0 = posAt(fU, kU, cInt), pk1 = posAt(fD, kD, cInt);
     let nrm = cross(pj1.sub(pj0), pk1.sub(pk0));
     nrm = nrm.mul(select(dot(nrm, dirAt(f0, cInt)).lessThan(0), float(-1), float(1)));
-    return { position: p0, normal: normalize(nrm) };
+    return { position: p0, normal: normalize(nrm), knee: rig.ownKnee, hip: rig.ownHip };
   }
 
   // QuadMesh otherwise borrows three's process-wide geometry. Own a copy so this

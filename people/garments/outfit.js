@@ -24,9 +24,14 @@ export const MEAN_BODIES = {
   boy: { sex: 0.85, age: 9, build: 0.5, muscle: 0.5, height: 1.35, skin: "#c99a74" },
 };
 // the working dress takes the same mean bodies: each cut of it is its own template, cut on the body of its age
-for (const [w, c] of [["wwoman", "adult"], ["wgirl", "girl"], ["wsmall", "small"], ["wman", "man"], ["wboy", "boy"]]) MEAN_BODIES[w] = MEAN_BODIES[c];
+for (const [w, c] of [["wwoman", "adult"], ["wgirl", "girl"], ["wsmall", "small"], ["wman", "man"], ["wboy", "boy"], ["wman-fit", "man"], ["wboy-fit", "boy"]]) MEAN_BODIES[w] = MEAN_BODIES[c];
 // the cut whose skin weights and topology every cut of an outfit shares (the class mesh's attributes are static): each outfit's first cut
-export const BASE_CUT = { adult: "adult", girl: "adult", small: "adult", man: "man", boy: "man", wwoman: "wwoman", wgirl: "wwoman", wsmall: "wwoman", wman: "wman", wboy: "wman" };
+export const BASE_CUT = { adult: "adult", girl: "adult", small: "adult", man: "man", boy: "man", wwoman: "wwoman", wgirl: "wwoman", wsmall: "wwoman", wman: "wman", wboy: "wman", "wman-fit": "wman-fit", "wboy-fit": "wman-fit" };
+// Round 3 of the hero study (Kabe, 2026-10-16: "the clothes still look like colorful trashbags"): the working man's clothes cut to the wearer (the fitted doublet, bodice.js
+// CUTS["wman-fit"], and breeches, skirt.js SKIRTS["closed-fit"]), dialled in on the hero's page first. setFit(true) there makes cutFor give a cut's fitted pieces where it has
+// them (cut.fit); everywhere else the crowd's cuts stand until the fit is approved.
+export const FIT = { on: false };
+export function setFit(on) { FIT.on = !!on; }
 
 export const GENTLEWOMAN = {
   id: "gentlewoman",
@@ -197,8 +202,8 @@ export const WORKMAN = {
   period: "London 1660 (r5-dress-1660.md, the working man: Pepys's doublets and breeches, Laroon 1687, reenactors' guides)",
   ages: { from: 6, to: Infinity, note: "men from 13 and breeched boys from 6; a boy under 6 is in skirts, which is not this outfit" },
   cuts: [
-    { id: "wboy", ages: [6, 13], bodice: "wboy", skirt: "closed", note: "a small working man's doublet and breeches, cut from the boy's own landmarks" },
-    { id: "wman", ages: [13, Infinity], bodice: "wman", skirt: "closed", note: "the doublet with its skirts to the hip, closed breeches to the knee" },
+    { id: "wboy", ages: [6, 13], bodice: "wboy", skirt: "closed", fit: { bodice: "wboy-fit", skirt: "closed-fit" }, note: "a small working man's doublet and breeches, cut from the boy's own landmarks" },
+    { id: "wman", ages: [13, Infinity], bodice: "wman", skirt: "closed", fit: { bodice: "wman-fit", skirt: "closed-fit" }, note: "the doublet with its skirts to the hip, closed breeches to the knee" },
   ],
   slots: { shell: "bodice", loose: "skirt", tubes: 2 },
   stuff: { 0: "doublet", 1: "doublet", 2: "doublet", 3: "linen", 4: "linen", 5: "linen", 6: "linen", 7: "linen", 8: "linen" },
@@ -267,8 +272,8 @@ function keepOutUncached(spec, J, height, outfit) {
 
 /** The cut a wearer of this age takes. */
 export function cutFor(age, outfit = GENTLEWOMAN) {
-  const c = outfit.cuts.find((c) => age >= c.ages[0] && age < c.ages[1]);
-  return c ?? (age < outfit.cuts[0].ages[0] ? outfit.cuts[0] : outfit.cuts[outfit.cuts.length - 1]);
+  const c = outfit.cuts.find((c) => age >= c.ages[0] && age < c.ages[1]) ?? (age < outfit.cuts[0].ages[0] ? outfit.cuts[0] : outfit.cuts[outfit.cuts.length - 1]);
+  return FIT.on && c.fit ? { ...c, ...c.fit } : c;
 }
 
 const templates = new Map();
